@@ -1,4 +1,4 @@
-# 🌸 Peony
+# 🌸 `Peony`
 
 **A calm, CLI-first cognitive holding space for unfinished thoughts.**
 
@@ -6,9 +6,9 @@
 
 ---
 
-## What is Peony?
+## What is `Peony`?
 
-Peony is a **local-first, humane CLI application** designed to help you capture, tend, and gently resolve half-formed thoughts—without forcing them into tasks, deadlines, or artificial structure.
+`Peony` is a **local-first, humane CLI application** designed to help you capture, tend, and gently resolve half-formed thoughts—without forcing them into tasks, deadlines, or artificial structure.
 
 Modern tools demand commitment too early:
 
@@ -16,7 +16,7 @@ Modern tools demand commitment too early:
 * notes apps become noisy dumping grounds
 * journals require emotional energy on demand
 
-**Peony offers a middle ground**:
+**`Peony` offers a middle ground**:
 a quiet place for thoughts that are *not ready yet*.
 
 ---
@@ -32,16 +32,16 @@ A thought may:
 * transform
 * or dissolve entirely
 
-Peony respects that process.
+`Peony` respects that process.
 
 ### Time-aware, not time-driven
 
-Peony never nags.
+`Peony` never nags.
 Thoughts resurface **when they feel ready**, not when a reminder fires.
 
 ### Language matters
 
-Peony speaks softly.
+`Peony` speaks softly.
 Commands are verbs, not flags.
 There are no streaks, no scores, no guilt loops.
 
@@ -53,7 +53,7 @@ Your inner life is not a dataset.
 
 ---
 
-## What Peony Is *Not*
+## What `Peony` Is *Not*
 
 * ❌ Not a productivity dashboard
 * ❌ Not a goal tracker
@@ -61,7 +61,7 @@ Your inner life is not a dataset.
 * ❌ Not collaborative or social
 * ❌ Not optimized for speed or scale
 
-Peony is optimized for **clarity and care**.
+`Peony` is optimized for **clarity and care**.
 
 ---
 
@@ -69,7 +69,7 @@ Peony is optimized for **clarity and care**.
 
 ### Cognitive Units (CUs)
 
-The fundamental object in Peony.
+The fundamental object in `Peony`.
 
 A Cognitive Unit can represent:
 
@@ -103,23 +103,23 @@ Nothing ever “fails.”
 
 ## CLI-First Experience
 
-Peony is designed to be **used from the terminal**, thoughtfully and slowly.
+`Peony` is designed to be **used from the terminal**, thoughtfully and slowly.
 
 ### Example interactions
 
 ```bash
-peony add
+`Peony` add
 > What’s on your mind?
 > "Unsure whether to double down on Go or consolidate Python first."
 ```
 
 ```bash
-peony tend
+`Peony` tend
 🌱 2 thoughts feel ready for reflection today.
 ```
 
 ```bash
-peony view
+`Peony` view
 🌸 This thought has been resting for 14 days.
 🌿 You last touched it late at night.
 ```
@@ -143,7 +143,7 @@ Commands are designed to feel **inviting**, not mechanical.
 
 ## Frontend: A Quiet Window
 
-Peony includes an **optional, read-only frontend**—a window into your inner landscape.
+`Peony` includes an **optional, read-only frontend**—a window into your inner landscape.
 
 ### Purpose
 
@@ -166,7 +166,7 @@ The frontend exists to **help you see**, not manage.
 ## Architecture Overview
 
 ```
-Peony
+`Peony`
 ├── Core Engine (Go)
 │   ├── Thought lifecycle
 │   ├── Temporal logic
@@ -202,7 +202,7 @@ Peony
 * **GoTH + HTMX** — minimal, server-driven UI
 * **Tailwind CSS** — restrained visual language
 
-> No JavaScript framework is required for Peony’s core philosophy.
+> No JavaScript framework is required for `Peony`’s core philosophy.
 
 ---
 
@@ -213,13 +213,13 @@ Peony
 * No telemetry
 * Your data lives with you
 
-Peony should still work the same way in ten years.
+`Peony` should still work the same way in ten years.
 
 ---
 
 ## Intended Users
 
-Peony is for people who:
+`Peony` is for people who:
 
 * think deeply
 * feel overwhelmed by premature structure
@@ -238,7 +238,7 @@ It is especially suited for:
 
 ## Project Status
 
-Peony is in **early development**.
+`Peony` is in **early development**.
 The focus is on:
 
 * core lifecycle correctness
@@ -263,19 +263,19 @@ AI integration, if ever added, will be:
 
 ---
 
-## Why “Peony”?
+## Why “`Peony`”?
 
 Peonies bloom slowly.
 They do not rush, yet they are unmistakably full.
 
-Peony exists for thoughts that need **time, space, and kindness**.
+`Peony` exists for thoughts that need **time, space, and kindness**.
 
 ---
 
 ## License
 
 MIT
-You are free to use, modify, and learn from Peony—
+You are free to use, modify, and learn from `Peony`—
 just as gently as it was designed.
 
 ---
