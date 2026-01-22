@@ -27,7 +27,7 @@ Commands:
   view                     View a thought by id
 
 Examples:
-  peony add "i should email alex"
+  peony add "I want to build a log cabin"
   peony view 12
 `)
 }
