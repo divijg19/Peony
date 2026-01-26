@@ -29,13 +29,13 @@ func TestStore_CreateThought_AndAppendEvent(t *testing.T) {
 		t.Fatalf("create thought returned id=%d", id)
 	}
 
-	err = store.AppendEvent(id, "captured", nil)
+	err = store.AppendEvent(id, "captured", nil, nil, nil)
 	if err != nil {
 		t.Fatalf("append event (nil note): %v", err)
 	}
 
 	note := "seed"
-	err = store.AppendEvent(id, "tended", &note)
+	err = store.AppendEvent(id, "tended", nil, nil, &note)
 	if err != nil {
 		t.Fatalf("append event (note): %v", err)
 	}

@@ -4,45 +4,22 @@ import (
 	"time"
 )
 
-// SettleDuration prevents freshly-captured thoughts from resurfacing immediately.
+// SettleDuration is added to a newly captured thought to compute its eligibility time.
 const SettleDuration = 18 * time.Hour
 
-// DefaultTendCooldown throttles how soon a recently tended thought can resurface.
-const DefaultTendCooldown = 36 * time.Hour
+// EligibleToSurface reports whether a thought is eligible to be tended at time now.
+func EligibleToSurface(thought Thought, now time.Time) bool {
+	switch thought.CurrentState {
+		case StateCaptured, StateResting:
 
-// EligibleToSurface reports whether a thought is eligible to be surfaced by `tend`.
-func EligibleToSurface(thought Thought, now time.Time) (bool) {
-	if thought.State == StateReleased || thought.State == StateArchived || thought.State == StateEvolved {
+		case StateEvolved, StateReleased, StateArchived:
+			return false
+		default:
+			return false
+	}
+
+	if thought.EligibilityAt.IsZero() {
 		return false
 	}
-
-	if !thought.CreatedAt.IsZero() && now.Sub(thought.CreatedAt) < SettleDuration {
-		return false
-	}
-
-	if thought.RestUntil != nil && now.Before(*thought.RestUntil) {
-		return false
-	}
-
-	if thought.LastTendedAt != nil && now.Sub(*thought.LastTendedAt) < DefaultTendCooldown {
-		return false
-	}
-
-	return true
-}
-
-// ComputeRestUntil returns the next rest boundary given a rest count.
-func ComputeRestUntil(now time.Time, restCount int) (time.Time) {
-	var d time.Duration
-	switch restCount {
-	case 0:
-		d = 24 * time.Hour
-	case 1:
-		d = 72 * time.Hour
-	case 2:
-		d = 168 * time.Hour
-	default:
-		d = 336 * time.Hour
-	}
-	return now.Add(d)
+	return !now.Before(thought.EligibilityAt)
 }
