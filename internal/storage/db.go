@@ -9,7 +9,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// DefaultDBPath returns the default location of Peony's local SQLite database.
+// DefaultDBPath returns the default filesystem location for Peony's SQLite database.
 func DefaultDBPath() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -18,7 +18,7 @@ func DefaultDBPath() (string, error) {
 	return filepath.Join(home, ".local", "share", "peony", "peony.db"), nil
 }
 
-// ResolveDBPath returns the database path, honoring PEONY_DB_PATH when set.
+// ResolveDBPath returns the database path from PEONY_DB_PATH if set, otherwise DefaultDBPath.
 func ResolveDBPath() (string, error) {
 	p := os.Getenv("PEONY_DB_PATH")
 	if p != "" {
@@ -27,28 +27,24 @@ func ResolveDBPath() (string, error) {
 	return DefaultDBPath()
 }
 
-// Open opens (or creates) the SQLite database at dbPath and applies migrations.
+// Open opens (or creates) a SQLite database at dbPath and applies migrations.
 func Open(dbPath string) (*sql.DB, error) {
 	if dbPath == "" {
 		return nil, fmt.Errorf("open: empty db path")
 	}
 
-	// Ensure parent directory exists.
 	err := os.MkdirAll(filepath.Dir(dbPath), 0o755)
 	if err != nil {
 		return nil, fmt.Errorf("open: create db dir: %w", err)
 	}
 
-	// Build DSN (SQLite connection string).
 	dsn := "file:" + dbPath + "?mode=rwc&_pragma=foreign_keys(1)"
 
-	// Open database handle.
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open: sql open: %w", err)
 	}
 
-	// Verify connection and migrate; close on failure.
 	err = db.Ping()
 	if err != nil {
 		_ = db.Close()
