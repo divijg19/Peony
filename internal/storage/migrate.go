@@ -5,34 +5,33 @@ import (
 	"fmt"
 )
 
-// SchemaVersion is the current SQLite schema version.
+// SchemaVersion is the latest schema version supported by the migrator.
 const SchemaVersion = 1
 
-// Migrate ensures the database schema is at SchemaVersion.
+// Migrate ensures the SQLite schema exists and is upgraded to SchemaVersion.
 func Migrate(db *sql.DB) error {
 	if db == nil {
 		return fmt.Errorf("migrate: db is nil")
 	}
 
-	// Ensure schema_migrations exists.
+	// err holds the error returned by each DDL/DML operation during migration.
 	_, err := db.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY);`)
 	if err != nil {
 		return fmt.Errorf("migrate: create schema_migrations: %w", err)
 	}
 
-	// Read the current schema version.
+	// current is the highest schema version recorded in schema_migrations.
 	var current int
 	err = db.QueryRow(`SELECT COALESCE(MAX(version), 0) FROM schema_migrations;`).Scan(&current)
 	if err != nil {
 		return fmt.Errorf("migrate: read current version: %w", err)
 	}
 
-	// No-op if up-to-date.
 	if current >= SchemaVersion {
 		return nil
 	}
 
-	// Run schema creation in a transaction.
+	// transaction groups schema changes so the migration is applied atomically.
 	transaction, err := db.Begin()
 	if err != nil {
 		return fmt.Errorf("migrate: begin transaction: %w", err)
@@ -41,7 +40,6 @@ func Migrate(db *sql.DB) error {
 		_ = transaction.Rollback()
 	}()
 
-	// Create thoughts table.
 	_, err = transaction.Exec(`
 		CREATE TABLE IF NOT EXISTS thoughts (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -60,7 +58,6 @@ func Migrate(db *sql.DB) error {
 		return fmt.Errorf("migrate: create thoughts table: %w", err)
 	}
 
-	// Create events table.
 	_, err = transaction.Exec(`
 		CREATE TABLE IF NOT EXISTS events (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -77,7 +74,6 @@ func Migrate(db *sql.DB) error {
 		return fmt.Errorf("migrate: create events table: %w", err)
 	}
 
-	// Create indexes.
 	_, err = transaction.Exec(`CREATE INDEX IF NOT EXISTS idx_thoughts_state_eligibility ON thoughts(current_state, eligibility_at);`)
 	if err != nil {
 		return fmt.Errorf("migrate: create idx_thoughts_state_eligibility: %w", err)
@@ -88,13 +84,11 @@ func Migrate(db *sql.DB) error {
 		return fmt.Errorf("migrate: create idx_events_thought_id_at: %w", err)
 	}
 
-	// Record applied version.
 	_, err = transaction.Exec(`INSERT INTO schema_migrations(version) VALUES (?);`, SchemaVersion)
 	if err != nil {
 		return fmt.Errorf("migrate: record schema version: %w", err)
 	}
 
-	// Commit the migration.
 	err = transaction.Commit()
 	if err != nil {
 		return fmt.Errorf("migrate: commit transaction: %w", err)

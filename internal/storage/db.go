@@ -9,7 +9,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// DefaultDBPath returns the default on-disk location for Peony's SQLite database.
+// DefaultDBPath returns the default filesystem location for Peony's SQLite database.
 func DefaultDBPath() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -27,19 +27,17 @@ func ResolveDBPath() (string, error) {
 	return DefaultDBPath()
 }
 
-// Open opens (or creates) a SQLite database at dbPath and runs migrations.
+// Open opens (or creates) a SQLite database at dbPath and applies migrations.
 func Open(dbPath string) (*sql.DB, error) {
 	if dbPath == "" {
 		return nil, fmt.Errorf("open: empty db path")
 	}
 
-	// Ensure the parent directory exists.
 	err := os.MkdirAll(filepath.Dir(dbPath), 0o755)
 	if err != nil {
 		return nil, fmt.Errorf("open: create db dir: %w", err)
 	}
 
-	// Connect to SQLite with foreign keys enabled.
 	dsn := "file:" + dbPath + "?mode=rwc&_pragma=foreign_keys(1)"
 
 	db, err := sql.Open("sqlite", dsn)
@@ -47,7 +45,6 @@ func Open(dbPath string) (*sql.DB, error) {
 		return nil, fmt.Errorf("open: sql open: %w", err)
 	}
 
-	// Verify connectivity and apply migrations.
 	err = db.Ping()
 	if err != nil {
 		_ = db.Close()

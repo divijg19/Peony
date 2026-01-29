@@ -16,7 +16,7 @@ const (
 	StateArchived State = "archived"
 )
 
-// Thought is the current snapshot of a thought.
+// Thought represents the current snapshot of a cognitive unit.
 type Thought struct {
 	ID            int64      `db:"id"`
 	Content       string     `db:"content"`
@@ -30,7 +30,7 @@ type Thought struct {
 	Energy        *int       `db:"energy"`
 }
 
-// Event is an append-only history record.
+// Event represents a single append-only history record for a thought.
 type Event struct {
 	ID            int64     `db:"id"`
 	ThoughtID     int64     `db:"thought_id"`

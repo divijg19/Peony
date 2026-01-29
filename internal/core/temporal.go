@@ -4,22 +4,28 @@ import (
 	"time"
 )
 
-// SettleDuration is added to a newly captured thought to compute its eligibility time.
+// SettleDuration defines how long a thought must rest before it becomes eligible to be tended.
 const SettleDuration = 18 * time.Hour
 
-// EligibleToSurface reports whether a thought is eligible to be tended at time now.
+// EligibleToSurface reports whether a thought is eligible to be tended at the given time.
 func EligibleToSurface(thought Thought, now time.Time) bool {
+	// Only captured and resting thoughts can surface for tending.
 	switch thought.CurrentState {
-		case StateCaptured, StateResting:
-
-		case StateEvolved, StateReleased, StateArchived:
-			return false
-		default:
-			return false
+	case StateCaptured, StateResting:
+		// eligible states
+	case StateEvolved, StateReleased, StateArchived:
+		// terminal states are never eligible
+		return false
+	default:
+		// unknown states are treated as ineligible
+		return false
 	}
 
+	// A zero eligibility timestamp is treated as not eligible.
 	if thought.EligibilityAt.IsZero() {
 		return false
 	}
+
+	// Eligibility is reached once now is at or after eligibility_at.
 	return !now.Before(thought.EligibilityAt)
 }

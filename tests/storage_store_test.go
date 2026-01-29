@@ -7,6 +7,7 @@ import (
 	"github.com/ri5hii/peony/internal/storage"
 )
 
+// TestStore_CreateThought_AndAppendEvent verifies creating a thought and appending events works end-to-end.
 func TestStore_CreateThought_AndAppendEvent(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "peony.db")
 
