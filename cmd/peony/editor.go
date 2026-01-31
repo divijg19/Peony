@@ -56,7 +56,7 @@ func OpenEditorWithTemplate(initialContent string, initialNote string) (content 
 		}
 	}
 	if editorPath == "" {
-		return nil, nil, fmt.Errorf("no editor found in $EDITOR/$VISUAL and no fallback (nano/vim/vi) is available")
+		return nil, nil, fmt.Errorf("no editor found in nano/vim/vi is available")
 	}
 
 	cmd := exec.Command(editorPath, path)
