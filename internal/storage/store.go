@@ -297,7 +297,8 @@ func (s *Store) GetTendThought(id int64) (core.Thought, []core.Event, error) {
 	sqlEvents := `SELECT id, thought_id, kind, at, previous_state, next_state, note
 	              FROM events
 	              WHERE thought_id = ?
-	              ORDER BY at ASC, id ASC`
+	              ORDER BY at ASC, id ASC
+				 `
 
 	rows, err := s.db.Query(sqlEvents, id)
 	if err != nil {
@@ -489,6 +490,95 @@ func (s *Store) ListTendThoughtsByPagination(limit, offset int) ([]core.Thought,
 
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("list tend thoughts: rows: %w", err)
+	}
+
+	return thoughts, nil
+}
+
+func (s *Store) FilterViewByPagination(limit, offset int, filter string) ([]core.Thought, error) {
+	if s == nil {
+		return nil, fmt.Errorf("list view thoughts: store is nil")
+	}
+	if s.db == nil {
+		return nil, fmt.Errorf("list view thoughts: db is nil")
+	}
+	if limit <= 0 {
+		return nil, fmt.Errorf("list view thoughts: limit must be > 0")
+	}
+	if offset < 0 {
+		return nil, fmt.Errorf("list view thoughts: offset must be >= 0")
+	}
+
+	sqlList := `SELECT id, content, current_state, tend_counter, created_at, updated_at, last_tended_at, eligibility_at, valence, energy
+	            FROM thoughts
+	            WHERE current_state IN (?)
+	            ORDER BY id ASC
+	            LIMIT ? OFFSET ?`
+
+	rows, err := s.db.Query(sqlList, filter, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("list view thoughts: query: %w", err)
+	}
+	defer rows.Close()
+
+	thoughts := make([]core.Thought, 0, limit)
+	for rows.Next() {
+		var thought core.Thought
+
+		var stateStr string
+		var tendCounter int
+		var createdAtStr, updatedAtStr string
+		var lastTendedAtStr sql.NullString
+		var eligibilityAtStr string
+		var valence sql.NullInt64
+		var energy sql.NullInt64
+
+		err = rows.Scan(&thought.ID, &thought.Content, &stateStr, &tendCounter, &createdAtStr, &updatedAtStr, &lastTendedAtStr, &eligibilityAtStr, &valence, &energy)
+		if err != nil {
+			return nil, fmt.Errorf("list view thoughts: scan: %w", err)
+		}
+
+		thought.CurrentState = core.State(stateStr)
+		thought.TendCounter = tendCounter
+
+		var err error
+		thought.CreatedAt, err = time.Parse(time.RFC3339Nano, createdAtStr)
+		if err != nil {
+			return nil, fmt.Errorf("list view thoughts: parse created_at: %w", err)
+		}
+
+		thought.UpdatedAt, err = time.Parse(time.RFC3339Nano, updatedAtStr)
+		if err != nil {
+			return nil, fmt.Errorf("list view thoughts: parse updated_at: %w", err)
+		}
+
+		thought.EligibilityAt, err = time.Parse(time.RFC3339Nano, eligibilityAtStr)
+		if err != nil {
+			return nil, fmt.Errorf("list view thoughts: parse eligibility_at: %w", err)
+		}
+
+		if lastTendedAtStr.Valid {
+			t, err := time.Parse(time.RFC3339Nano, lastTendedAtStr.String)
+			if err != nil {
+				return nil, fmt.Errorf("list view thoughts: parse last_tended_at: %w", err)
+			}
+			thought.LastTendedAt = &t
+		}
+
+		if valence.Valid {
+			v := int(valence.Int64)
+			thought.Valence = &v
+		}
+		if energy.Valid {
+			e := int(energy.Int64)
+			thought.Energy = &e
+		}
+
+		thoughts = append(thoughts, thought)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list view thoughts: rows: %w", err)
 	}
 
 	return thoughts, nil

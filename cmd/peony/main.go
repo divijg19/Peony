@@ -32,8 +32,10 @@ func PrintHelp() {
          tend, t                  list thoughts which are ready to be tended
 
          Examples:
+		 peony help view
          peony add "I want to build a log cabin"
          peony view 12
+		 peony view --archived
 `)
 }
 
@@ -184,131 +186,210 @@ func cmdView(args []string) int {
 			}
 		}
 	}
+	if len(args) == 1 {
+		if id, err := strconv.ParseInt(args[0], 10, 64); err == nil && id > 0 {
+			st, closeDB, err := openStore()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "view: %v\n", err)
+				return 1
+			}
+			defer closeDB()
 
-	id, err := strconv.ParseInt(args[0], 10, 64)
-	if err != nil || id <= 0 {
-		fmt.Fprintln(os.Stderr, "view: invalid id")
-		return 2
-	}
+			thought, events, err := st.GetThought(id)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "view: %v\n", err)
+				return 1
+			}
 
-	st, closeDB, err := openStore()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "view: %v\n", err)
-		return 1
-	}
-	defer closeDB()
+			fmt.Printf("#%d  %s  (tends: %d)\n", thought.ID, thought.CurrentState, thought.TendCounter)
 
-	thought, events, err := st.GetThought(id)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "view: %v\n", err)
-		return 1
-	}
+			now := time.Now().UTC()
 
-	fmt.Printf("#%d  %s  (tends: %d)\n", thought.ID, thought.CurrentState, thought.TendCounter)
+			formatShortUTC := func(t time.Time) string {
+				return t.UTC().Format("2006-01-02 15:04Z")
+			}
 
-	now := time.Now().UTC()
+			formatRelative := func(t time.Time, now time.Time) string {
+				d := t.Sub(now)
+				if d < 0 {
+					d = -d
+					switch {
+					case d < time.Minute:
+						return "just now"
+					case d < time.Hour:
+						return fmt.Sprintf("%dm ago", int(d.Minutes()))
+					case d < 24*time.Hour:
+						return fmt.Sprintf("%dh ago", int(d.Hours()))
+					default:
+						return fmt.Sprintf("%dd ago", int(d.Hours()/24))
+					}
+				}
 
-	formatShortUTC := func(t time.Time) string {
-		return t.UTC().Format("2006-01-02 15:04Z")
-	}
+				switch {
+				case d < time.Minute:
+					return "in <1m"
+				case d < time.Hour:
+					return fmt.Sprintf("in %dm", int(d.Minutes()))
+				case d < 24*time.Hour:
+					return fmt.Sprintf("in %dh", int(d.Hours()))
+				default:
+					return fmt.Sprintf("in %dd", int(d.Hours()/24))
+				}
+			}
 
-	formatRelative := func(t time.Time, now time.Time) string {
-		d := t.Sub(now)
-		if d < 0 {
-			d = -d
-			switch {
-			case d < time.Minute:
-				return "just now"
-			case d < time.Hour:
-				return fmt.Sprintf("%dm ago", int(d.Minutes()))
-			case d < 24*time.Hour:
-				return fmt.Sprintf("%dh ago", int(d.Hours()))
+			switch thought.CurrentState {
+			case core.StateCaptured, core.StateResting:
+				eligible := core.EligibleToSurface(thought, now)
+				if eligible {
+					fmt.Println("Eligible: yes")
+				} else {
+					fmt.Printf("Eligible: %s (at %s)\n", formatRelative(thought.EligibilityAt, now), formatShortUTC(thought.EligibilityAt))
+				}
+			case core.StateTended:
+				fmt.Println("Needs resolution: rest/evolve/release/archive")
+			case core.StateEvolved, core.StateReleased, core.StateArchived:
+				fmt.Printf("Terminal: %s\n", thought.CurrentState)
 			default:
-				return fmt.Sprintf("%dd ago", int(d.Hours()/24))
+				fmt.Printf("State: %s\n", thought.CurrentState)
 			}
+
+			fmt.Println()
+			fmt.Println("CONTENT")
+			fmt.Println(thought.Content)
+
+			fmt.Println()
+			fmt.Println("META")
+			fmt.Printf("Created:  %s (%s)\n", formatShortUTC(thought.CreatedAt), formatRelative(thought.CreatedAt, now))
+			fmt.Printf("Updated:  %s (%s)\n", formatShortUTC(thought.UpdatedAt), formatRelative(thought.UpdatedAt, now))
+			fmt.Printf("Eligible: %s (%s)\n", formatShortUTC(thought.EligibilityAt), formatRelative(thought.EligibilityAt, now))
+
+			if thought.LastTendedAt != nil {
+				fmt.Printf("Last tended: %s (%s)\n", formatShortUTC(*thought.LastTendedAt), formatRelative(*thought.LastTendedAt, now))
+			}
+			if thought.Valence != nil {
+				fmt.Printf("Valence: %d\n", *thought.Valence)
+			}
+			if thought.Energy != nil {
+				fmt.Printf("Energy: %d\n", *thought.Energy)
+			}
+
+			if len(events) > 0 {
+				fmt.Println()
+				fmt.Println("EVENTS")
+				for _, ev := range events {
+					at := formatShortUTC(ev.At)
+
+					transition := ""
+					if ev.PreviousState != nil || ev.NextState != nil {
+						prevState := ""
+						nextState := ""
+						if ev.PreviousState != nil {
+							prevState = string(*ev.PreviousState)
+						}
+						if ev.NextState != nil {
+							nextState = string(*ev.NextState)
+						}
+
+						if prevState == "" && nextState != "" {
+							transition = " " + nextState
+						} else if prevState != "" && nextState == "" {
+							transition = " " + prevState
+						} else if prevState != "" || nextState != "" {
+							transition = fmt.Sprintf(" %s → %s", prevState, nextState)
+						}
+					}
+
+					fmt.Printf("- %s  %s%s\n", at, ev.Kind, transition)
+					if ev.Note != nil && strings.TrimSpace(*ev.Note) != "" {
+						fmt.Printf("  note: %s\n", strings.TrimSpace(*ev.Note))
+					}
+				}
+			}
+			return 0
+		}
+		filter := strings.TrimSpace(strings.Join(args, " "))
+		if after, ok := strings.CutPrefix(filter, "--"); ok {
+			filter = after
 		}
 
-		switch {
-		case d < time.Minute:
-			return "in <1m"
-		case d < time.Hour:
-			return fmt.Sprintf("in %dm", int(d.Minutes()))
-		case d < 24*time.Hour:
-			return fmt.Sprintf("in %dh", int(d.Hours()))
+		switch filter {
+		case "captured", "resting", "tended", "evolved", "released", "archived":
+
 		default:
-			return fmt.Sprintf("in %dd", int(d.Hours()/24))
+			fmt.Fprintln(os.Stderr, "view: invalid filter")
+			return 2
 		}
-	}
-
-	switch thought.CurrentState {
-	case core.StateCaptured, core.StateResting:
-		eligible := core.EligibleToSurface(thought, now)
-		if eligible {
-			fmt.Println("Eligible: yes")
-		} else {
-			fmt.Printf("Eligible: %s (at %s)\n", formatRelative(thought.EligibilityAt, now), formatShortUTC(thought.EligibilityAt))
+		st, closeDB, err := openStore()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "view: %v\n", err)
+			return 1
 		}
-	case core.StateTended:
-		fmt.Println("Needs resolution: rest/evolve/release/archive")
-	case core.StateEvolved, core.StateReleased, core.StateArchived:
-		fmt.Printf("Terminal: %s\n", thought.CurrentState)
-	default:
-		fmt.Printf("State: %s\n", thought.CurrentState)
-	}
+		defer closeDB()
 
-	fmt.Println()
-	fmt.Println("CONTENT")
-	fmt.Println(thought.Content)
+		reader := bufio.NewReader(os.Stdin)
+		pageSize := 10
+		page := 0
 
-	fmt.Println()
-	fmt.Println("META")
-	fmt.Printf("Created:  %s (%s)\n", formatShortUTC(thought.CreatedAt), formatRelative(thought.CreatedAt, now))
-	fmt.Printf("Updated:  %s (%s)\n", formatShortUTC(thought.UpdatedAt), formatRelative(thought.UpdatedAt, now))
-	fmt.Printf("Eligible: %s (%s)\n", formatShortUTC(thought.EligibilityAt), formatRelative(thought.EligibilityAt, now))
+		overview := func(s string) string {
+			s = strings.ReplaceAll(s, "\n", " ")
+			s = strings.TrimSpace(s)
+			const max = 80
+			if len(s) <= max {
+				return s
+			}
+			return s[:max-1] + "…"
+		}
 
-	if thought.LastTendedAt != nil {
-		fmt.Printf("Last tended: %s (%s)\n", formatShortUTC(*thought.LastTendedAt), formatRelative(*thought.LastTendedAt, now))
-	}
-	if thought.Valence != nil {
-		fmt.Printf("Valence: %d\n", *thought.Valence)
-	}
-	if thought.Energy != nil {
-		fmt.Printf("Energy: %d\n", *thought.Energy)
-	}
-
-	if len(events) > 0 {
-		fmt.Println()
-		fmt.Println("EVENTS")
-		for _, ev := range events {
-			at := formatShortUTC(ev.At)
-
-			transition := ""
-			if ev.PreviousState != nil || ev.NextState != nil {
-				prevState := ""
-				nextState := ""
-				if ev.PreviousState != nil {
-					prevState = string(*ev.PreviousState)
-				}
-				if ev.NextState != nil {
-					nextState = string(*ev.NextState)
-				}
-
-				if prevState == "" && nextState != "" {
-					transition = " " + nextState
-				} else if prevState != "" && nextState == "" {
-					transition = " " + prevState
-				} else if prevState != "" || nextState != "" {
-					transition = fmt.Sprintf(" %s → %s", prevState, nextState)
-				}
+		for {
+			offset := page * pageSize
+			thoughts, err := st.FilterViewByPagination(pageSize, offset, filter)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "view: %v\n", err)
+				return 1
 			}
 
-			fmt.Printf("- %s  %s%s\n", at, ev.Kind, transition)
-			if ev.Note != nil && strings.TrimSpace(*ev.Note) != "" {
-				fmt.Printf("  note: %s\n", strings.TrimSpace(*ev.Note))
+			if len(thoughts) == 0 {
+				if page == 0 {
+					fmt.Println("No thoughts yet.")
+					return 0
+				}
+				page--
+				continue
+			}
+
+			fmt.Printf("Page %d\n", page+1)
+			fmt.Printf("%-6s %-10s %-5s %-20s %s\n", "ID", "STATE", "TEND", "UPDATED", "OVERVIEW")
+			for _, th := range thoughts {
+				fmt.Printf("%-6d %-10s %-5d %-20s %s\n",
+					th.ID,
+					th.CurrentState,
+					th.TendCounter,
+					th.UpdatedAt.UTC().Format("2006-01-02 15:04"),
+					overview(th.Content),
+				)
+			}
+
+			fmt.Print("[n]ext, [p]rev, [q]uit: ")
+			line, err := reader.ReadString('\n')
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "view: read: %v\n", err)
+				return 1
+			}
+
+			switch strings.ToLower(strings.TrimSpace(line)) {
+			case "q":
+				return 0
+			case "p":
+				if page > 0 {
+					page--
+				}
+			default:
+				if len(thoughts) == pageSize {
+					page++
+				}
 			}
 		}
 	}
-
 	return 0
 }
 
