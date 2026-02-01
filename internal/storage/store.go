@@ -366,10 +366,11 @@ func (s *Store) ListThoughtsByPagination(limit, offset int) ([]core.Thought, err
 
 	sqlList := `SELECT id, content, current_state, tend_counter, updated_at
                 FROM thoughts
+				WHERE current_state != ?
                 ORDER BY updated_at ASC, id ASC
                 LIMIT ? OFFSET ?`
 
-	rows, err := s.db.Query(sqlList, limit, offset)
+	rows, err := s.db.Query(sqlList, "archived",  limit, offset)
 	if err != nil {
 		return nil, fmt.Errorf("list thoughts: query: %w", err)
 	}
