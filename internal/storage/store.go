@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -34,10 +36,12 @@ func (s *Store) CreateThought(content string) (int64, error) {
 	if content == "" {
 		return -1, fmt.Errorf("create thought: content is empty")
 	}
+	// created_at/updated_at are recorded in UTC; eligibility_at is computed from SettleDuration.
 	nowTime := time.Now().UTC()
 	now := nowTime.Format(time.RFC3339Nano)
 	eligibilityAt := nowTime.Add(core.SettleDuration).Format(time.RFC3339Nano)
 	state := core.StateCaptured
+	// Insert the initial thought row.
 	sqlString := `INSERT INTO thoughts (content, current_state, tend_counter, created_at, updated_at, last_tended_at, eligibility_at, valence, energy)
 	             VALUES (?, ?, 0, ?, ?, NULL, ?, NULL, NULL)`
 	var err error
@@ -70,6 +74,7 @@ func (s *Store) AppendEvent(thoughtID int64, kind string, previousState, nextSta
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 
+	// Translate optional values into SQL NULLs.
 	var previousStateValue any
 	if previousState != nil {
 		previousStateValue = string(*previousState)
@@ -136,6 +141,7 @@ func (s *Store) GetThought(id int64) (core.Thought, []core.Event, error) {
 	thought.CurrentState = core.State(stateStr)
 	thought.TendCounter = tendCounter
 
+	// Parse stored timestamps.
 	thought.CreatedAt, err = time.Parse(time.RFC3339Nano, createdAtStr)
 	if err != nil {
 		return core.Thought{}, nil, fmt.Errorf("get thought: parse created_at: %w", err)
@@ -169,6 +175,7 @@ func (s *Store) GetThought(id int64) (core.Thought, []core.Event, error) {
 		thought.Energy = &e
 	}
 
+	// Load the append-only event history in chronological order.
 	sqlEvents := `SELECT id, thought_id, kind, at, previous_state, next_state, note FROM events WHERE thought_id = ? ORDER BY at ASC, id ASC`
 	var rows *sql.Rows
 	rows, err = s.db.Query(sqlEvents, id)
@@ -370,7 +377,7 @@ func (s *Store) ListThoughtsByPagination(limit, offset int) ([]core.Thought, err
                 ORDER BY updated_at ASC, id ASC
                 LIMIT ? OFFSET ?`
 
-	rows, err := s.db.Query(sqlList, "archived",  limit, offset)
+	rows, err := s.db.Query(sqlList, "archived", limit, offset)
 	if err != nil {
 		return nil, fmt.Errorf("list thoughts: query: %w", err)
 	}
@@ -488,7 +495,6 @@ func (s *Store) ListTendThoughtsByPagination(limit, offset int) ([]core.Thought,
 
 		thoughts = append(thoughts, thought)
 	}
-
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("list tend thoughts: rows: %w", err)
 	}
@@ -496,6 +502,75 @@ func (s *Store) ListTendThoughtsByPagination(limit, offset int) ([]core.Thought,
 	return thoughts, nil
 }
 
+// CountTendReady returns the number of thoughts currently eligible to be tended.
+func (s *Store) CountTendReady() (int, error) {
+	if s == nil {
+		return 0, fmt.Errorf("count tend ready: store is nil")
+	}
+	if s.db == nil {
+		return 0, fmt.Errorf("count tend ready: db is nil")
+	}
+
+	nowStr := time.Now().UTC().Format(time.RFC3339Nano)
+
+	var n int
+	sqlQuery := `SELECT COUNT(*)
+         		 FROM thoughts
+         		 WHERE current_state IN (?, ?)
+           		 	AND eligibility_at <= ?`
+	err := s.db.QueryRow(sqlQuery, string(core.StateCaptured), string(core.StateResting), nowStr).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("count tend ready: scan: %w", err)
+	}
+	return n, nil
+}
+
+// DidCountTendChange returns true when n differs from the last value recorded.
+//
+// This is used to avoid printing the tend notice repeatedly across multiple
+// `peony` invocations. The last value is persisted in a small temp file.
+func (s *Store) DidCountTendChange(n int) bool {
+	path := filepath.Join(os.TempDir(), "peony_last_tendReady_count")
+	file, err := os.Open(path)
+	if err != nil {
+		// First time (or missing file): create it and treat as "changed".
+		file, err = os.Create(path)
+		if err != nil {
+			return true
+		}
+		defer file.Close()
+
+		_, _ = fmt.Fprintf(file, "%d\n", n)
+		return true
+	}
+	defer file.Close()
+
+	var prev int
+	_, err = fmt.Fscan(file, &prev)
+	if err != nil {
+		// Corrupt/empty file: overwrite and treat as "changed".
+		f2, err2 := os.Create(path)
+		if err2 == nil {
+			_, _ = fmt.Fprintf(f2, "%d\n", n)
+			_ = f2.Close()
+		}
+		return true
+	}
+
+	if prev == n {
+		return false
+	}
+
+	// Value changed: overwrite stored value.
+	f2, err := os.Create(path)
+	if err == nil {
+		_, _ = fmt.Fprintf(f2, "%d\n", n)
+		_ = f2.Close()
+	}
+	return true
+}
+
+// FilterViewByPagination returns a page of thoughts whose state matches filter.
 func (s *Store) FilterViewByPagination(limit, offset int, filter string) ([]core.Thought, error) {
 	if s == nil {
 		return nil, fmt.Errorf("list view thoughts: store is nil")
@@ -634,6 +709,7 @@ func (s *Store) MarkThoughtTended(id int64, note *string) error {
 		return fmt.Errorf("mark thought tended: invalid thought ID")
 	}
 
+	// Use a transaction so the thought update and event append happen atomically.
 	tx, err := s.db.Begin()
 	if err != nil {
 		return fmt.Errorf("mark thought tended: begin tx: %w", err)
@@ -701,7 +777,6 @@ func (s *Store) MarkThoughtTended(id int64, note *string) error {
 	}
 	return nil
 }
-
 
 // TransitionPostTendResolutionStrict transitions a tended thought into resting or a terminal state and appends exactly one event.
 func (s *Store) TransitionPostTendResolutionStrict(id int64, next core.State, note *string) error {

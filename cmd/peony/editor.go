@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -14,6 +15,7 @@ func OpenEditorWithTemplate(initialContent string, initialNote string) (content 
 	// NoteHeader marks the start of the optional note section in the editor template.
 	NoteHeader := "--- note ---"
 
+	// CreateTemp writes the editable template to a temporary file.
 	file, err := os.CreateTemp("", "peonyTend.txt")
 	if err != nil {
 		return nil, nil, err
@@ -21,6 +23,7 @@ func OpenEditorWithTemplate(initialContent string, initialNote string) (content 
 	path := file.Name()
 
 	defer func() {
+		// Best-effort cleanup of the temp file.
 		os.Remove(path)
 	}()
 
@@ -43,27 +46,60 @@ func OpenEditorWithTemplate(initialContent string, initialNote string) (content 
 		return nil, nil, err
 	}
 
-	editors := []string{"nano", "vim", "vi"}
-	var editorPath string
+	// editors defines the preferred order for editor selection.
+	editors := []string{os.Getenv("VISUAL"), os.Getenv("EDITOR"), "nano", "vim", "vi"}
+
+	var cmd *exec.Cmd
+
 	for _, e := range editors {
+		e = strings.TrimSpace(e)
 		if e == "" {
 			continue
 		}
-		editorBin, err := exec.LookPath(e)
-		if err == nil {
-			editorPath = editorBin
-			break
+
+		// Split the editor command into argv. 
+		argv := strings.Fields(e)
+		if len(argv) == 0 {
+			continue
 		}
-	}
-	if editorPath == "" {
-		return nil, nil, fmt.Errorf("no editor found in nano/vim/vi is available")
+
+		// Resolve the editor executable via PATH.
+		editorBin, err := exec.LookPath(argv[0])
+		if err != nil {
+			continue
+		}
+
+		args := argv[1:]
+		base := filepath.Base(editorBin)
+		if base == "code" || base == "code-insiders" || base == "codium" || base == "vscodium" {
+			// VS Code-like editors need --wait, otherwise they return immediately.
+			hasWait := false
+			for _, a := range args {
+				if a == "--wait" {
+					hasWait = true
+					break
+				}
+			}
+			if !hasWait {
+				args = append(args, "--wait")
+			}
+		}
+
+		// Append the temp file path as the final argument.
+		args = append(args, path)
+		cmd = exec.Command(editorBin, args...)
+		break
 	}
 
-	cmd := exec.Command(editorPath, path)
+	if cmd == nil {
+		return nil, nil, fmt.Errorf("no editor found in $VISUAL/$EDITOR and no fallback (nano/vim/vi) is available")
+	}
 
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+
+	// cmd.Run blocks until the editor process exits.
 	err = cmd.Run()
 	if err != nil {
 		return nil, nil, err
@@ -81,6 +117,7 @@ func OpenEditorWithTemplate(initialContent string, initialNote string) (content 
 		lines = append(lines, strings.TrimRight(ln, "\r"))
 	}
 
+	// stripTemplateLine removes comment-only lines from the template.
 	stripTemplateLine := func(line string) (string, bool) {
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmed, "//") {
@@ -97,6 +134,7 @@ func OpenEditorWithTemplate(initialContent string, initialNote string) (content 
 		effectiveLines = append(effectiveLines, ln)
 	}
 
+	// Find section headers in the edited content.
 	contentIndex := -1
 	noteIndex := -1
 	for idx, line := range effectiveLines {
