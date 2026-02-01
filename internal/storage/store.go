@@ -226,6 +226,149 @@ func (s *Store) GetThought(id int64) (core.Thought, []core.Event, error) {
 	return thought, events, nil
 }
 
+// ReleaseThought permanently removes a thought and its events.
+func (s *Store) ReleaseThought(id int64) error {
+	if s == nil {
+		return fmt.Errorf("release thought: store is nil")
+	}
+	if s.db == nil {
+		return fmt.Errorf("release thought: db is nil")
+	}
+	if id <= 0 {
+		return fmt.Errorf("release thought: invalid thought ID")
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("release thought: begin tx: %w", err)
+	}
+	defer func() {
+		_ = tx.Rollback()
+	}()
+
+	// Delete dependent events first.
+	_, err = tx.Exec(`DELETE FROM events WHERE thought_id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("release thought: delete events: %w", err)
+	}
+
+	res, err := tx.Exec(`DELETE FROM thoughts WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("release thought: delete thought: %w", err)
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("release thought: rows affected: %w", err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("release thought: not found")
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("release thought: commit: %w", err)
+	}
+	return nil
+}
+
+// ReindexThoughtIDs renumbers thoughts.id into a dense 1..N sequence and updates events.thought_id to match.
+func (s *Store) ReindexThoughtIDs() error {
+	if s == nil {
+		return fmt.Errorf("reindex thought ids: store is nil")
+	}
+	if s.db == nil {
+		return fmt.Errorf("reindex thought ids: db is nil")
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("reindex thought ids: begin tx: %w", err)
+	}
+	defer func() {
+		_ = tx.Rollback()
+	}()
+
+	// Defer FK checks to commit so we can update parent/child IDs safely.
+	_, _ = tx.Exec(`PRAGMA defer_foreign_keys = ON;`)
+
+	rows, err := tx.Query(`SELECT id FROM thoughts ORDER BY id ASC`)
+	if err != nil {
+		return fmt.Errorf("reindex thought ids: list ids: %w", err)
+	}
+	defer rows.Close()
+
+	type mapping struct {
+		oldID int64
+		newID int64
+	}
+
+	maps := make([]mapping, 0)
+	var nextID int64 = 1
+	for rows.Next() {
+		var old int64
+		if err := rows.Scan(&old); err != nil {
+			return fmt.Errorf("reindex thought ids: scan id: %w", err)
+		}
+		maps = append(maps, mapping{oldID: old, newID: nextID})
+		nextID++
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("reindex thought ids: ids rows: %w", err)
+	}
+
+	if len(maps) == 0 {
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("reindex thought ids: commit: %w", err)
+		}
+		return nil
+	}
+
+	//move all mapped IDs to temporary negative values to avoid collisions.
+	for _, m := range maps {
+		tmp := -m.newID
+		if _, err := tx.Exec(`UPDATE thoughts SET id = ? WHERE id = ?`, tmp, m.oldID); err != nil {
+			return fmt.Errorf("reindex thought ids: tmp update thoughts: %w", err)
+		}
+	}
+	for _, m := range maps {
+		tmp := -m.newID
+		if _, err := tx.Exec(`UPDATE events SET thought_id = ? WHERE thought_id = ?`, tmp, m.oldID); err != nil {
+			return fmt.Errorf("reindex thought ids: tmp update events: %w", err)
+		}
+	}
+
+	//flip temporary negative IDs back to positive.
+	if _, err := tx.Exec(`UPDATE thoughts SET id = -id WHERE id < 0`); err != nil {
+		return fmt.Errorf("reindex thought ids: finalize thoughts: %w", err)
+	}
+	if _, err := tx.Exec(`UPDATE events SET thought_id = -thought_id WHERE thought_id < 0`); err != nil {
+		return fmt.Errorf("reindex thought ids: finalize events: %w", err)
+	}
+
+	// Reset AUTOINCREMENT sequence so newly created thoughts continue from max(id).
+	// sqlite_sequence exists once an AUTOINCREMENT table has been inserted into.
+	_, _ = tx.Exec(`UPDATE sqlite_sequence
+		SET seq = (SELECT COALESCE(MAX(id), 0) FROM thoughts)
+		WHERE name = 'thoughts'`)
+	_, _ = tx.Exec(`INSERT INTO sqlite_sequence(name, seq)
+		SELECT 'thoughts', (SELECT COALESCE(MAX(id), 0) FROM thoughts)
+		WHERE NOT EXISTS (SELECT 1 FROM sqlite_sequence WHERE name = 'thoughts')`)
+
+	// Validate referential integrity before committing.
+	checkRows, err := tx.Query(`PRAGMA foreign_key_check;`)
+	if err != nil {
+		return fmt.Errorf("reindex thought ids: foreign_key_check: %w", err)
+	}
+	defer checkRows.Close()
+	if checkRows.Next() {
+		return fmt.Errorf("reindex thought ids: foreign_key_check failed")
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("reindex thought ids: commit: %w", err)
+	}
+	return nil
+}
+
 // GetTendThought returns a thought and its events only if it is currently eligible for tending.
 func (s *Store) GetTendThought(id int64) (core.Thought, []core.Event, error) {
 	if s == nil {

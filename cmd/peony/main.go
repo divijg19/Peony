@@ -30,6 +30,7 @@ func PrintHelp() {
          add, a                   Capture a thought
          view, v                  View the list of thoughts or a thought by id
          tend, t                  list thoughts which are ready to be tended
+		 release, r				  releases a thought
 
          Examples:
 		 peony help --view / peony help view
@@ -600,6 +601,50 @@ func promptChoice(reader *bufio.Reader, question string, choices []string) (stri
 	}
 }
 
+// cmdRelease permanently removes a thought (and its event history).
+func cmdRelease(args []string) int {
+	if len(args) != 1 {
+		fmt.Fprintln(os.Stderr, "release: usage: `peony release <id>`")
+		return 2
+	}
+
+	id, err := strconv.ParseInt(args[0], 10, 64)
+	if err != nil || id <= 0 {
+		fmt.Fprintln(os.Stderr, "release: invalid id")
+		return 2
+	}
+
+	st, closeDB, err := openStore()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "release: %v\n", err)
+		return 1
+	}
+	defer closeDB()
+
+	reader := bufio.NewReader(os.Stdin)
+	ok, err := promptYesNo(reader, fmt.Sprintf("Release thought #%d? This will delete it.", id))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "release: %v\n", err)
+		return 1
+	}
+	if !ok {
+		return 0
+	}
+
+	if err := st.ReleaseThought(id); err != nil {
+		fmt.Fprintf(os.Stderr, "release: %v\n", err)
+		return 1
+	}
+
+	if err := st.ReindexThoughtIDs(); err != nil {
+		fmt.Fprintf(os.Stderr, "release: reindex ids: %v\n", err)
+		return 1
+	}
+
+	fmt.Printf("Released #%d.\n", id)
+	return 0
+}
+
 // main dispatches CLI commands to their corresponding handlers.
 func main() {
 	args := os.Args[1:]
@@ -641,6 +686,8 @@ func main() {
 	case "tend", "t":
 		os.Exit(cmdTend(rest))
 
+	case "release", "r":
+		os.Exit(cmdRelease(rest))
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command: %s\n", cmd)
 		PrintHelp()
