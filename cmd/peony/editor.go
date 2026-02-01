@@ -4,8 +4,70 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
+
+func buildEditorCommand(editor string, path string) (*exec.Cmd, error) {
+	trimmed := strings.TrimSpace(editor)
+	if trimmed == "" {
+		return nil, fmt.Errorf("empty editor")
+	}
+
+	argv := strings.Fields(trimmed)
+	if len(argv) == 0 {
+		return nil, fmt.Errorf("empty editor")
+	}
+
+	editorBin, err := exec.LookPath(argv[0])
+	if err != nil {
+		return nil, err
+	}
+
+	args := argv[1:]
+	base := filepath.Base(editorBin)
+	if base == "code" || base == "code-insiders" || base == "codium" || base == "vscodium" {
+		hasWait := false
+		for _, a := range args {
+			if a == "--wait" {
+				hasWait = true
+				break
+			}
+		}
+		if !hasWait {
+			args = append(args, "--wait")
+		}
+	}
+
+	args = append(args, path)
+	return exec.Command(editorBin, args...), nil
+}
+
+func availableEditors() []string {
+	candidates := []string{os.Getenv("VISUAL"), os.Getenv("EDITOR"), "code", "code-insiders", "codium", "vscodium", "subl", "sublime", "nvim", "vim", "vi", "nano", "emacs", "micro", "kate", "gedit"}
+	seen := make(map[string]struct{})
+	editors := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			continue
+		}
+		if _, ok := seen[candidate]; ok {
+			continue
+		}
+		argv := strings.Fields(candidate)
+		if len(argv) == 0 {
+			continue
+		}
+		if _, err := exec.LookPath(argv[0]); err != nil {
+			continue
+		}
+		seen[candidate] = struct{}{}
+		editors = append(editors, candidate)
+	}
+
+	return editors
+}
 
 // OpenEditorWithTemplate opens a temp file in the user's editor, then parses and returns edited content and an optional note.
 func OpenEditorWithTemplate(initialContent string, initialNote string) (content *string, note *string, err error) {
@@ -14,6 +76,7 @@ func OpenEditorWithTemplate(initialContent string, initialNote string) (content 
 	// NoteHeader marks the start of the optional note section in the editor template.
 	NoteHeader := "--- note ---"
 
+	// CreateTemp writes the editable template to a temporary file.
 	file, err := os.CreateTemp("", "peonyTend.txt")
 	if err != nil {
 		return nil, nil, err
@@ -21,6 +84,7 @@ func OpenEditorWithTemplate(initialContent string, initialNote string) (content 
 	path := file.Name()
 
 	defer func() {
+		// Best-effort cleanup of the temp file.
 		os.Remove(path)
 	}()
 
@@ -43,27 +107,32 @@ func OpenEditorWithTemplate(initialContent string, initialNote string) (content 
 		return nil, nil, err
 	}
 
-	editors := []string{"nano", "vim", "vi"}
-	var editorPath string
-	for _, e := range editors {
-		if e == "" {
-			continue
+	var cmd *exec.Cmd
+	if cfg, _ := loadRuntimeConfig(); strings.TrimSpace(cfg.Editor) != "" {
+		configured := strings.TrimSpace(cfg.Editor)
+		cmd, err = buildEditorCommand(configured, path)
+		if err != nil {
+			return nil, nil, fmt.Errorf("configured editor not found: %w", err)
 		}
-		editorBin, err := exec.LookPath(e)
-		if err == nil {
-			editorPath = editorBin
-			break
+	} else {
+		editors := []string{os.Getenv("VISUAL"), os.Getenv("EDITOR"), "nano", "vim", "vi"}
+		for _, e := range editors {
+			cmd, err = buildEditorCommand(e, path)
+			if err == nil {
+				break
+			}
+			cmd = nil
+		}
+		if cmd == nil {
+			return nil, nil, fmt.Errorf("no editor found in $VISUAL/$EDITOR and no fallback (nano/vim/vi) is available")
 		}
 	}
-	if editorPath == "" {
-		return nil, nil, fmt.Errorf("no editor found in nano/vim/vi is available")
-	}
-
-	cmd := exec.Command(editorPath, path)
 
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+
+	// cmd.Run blocks until the editor process exits.
 	err = cmd.Run()
 	if err != nil {
 		return nil, nil, err
@@ -81,6 +150,7 @@ func OpenEditorWithTemplate(initialContent string, initialNote string) (content 
 		lines = append(lines, strings.TrimRight(ln, "\r"))
 	}
 
+	// stripTemplateLine removes comment-only lines from the template.
 	stripTemplateLine := func(line string) (string, bool) {
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmed, "//") {
@@ -97,6 +167,7 @@ func OpenEditorWithTemplate(initialContent string, initialNote string) (content 
 		effectiveLines = append(effectiveLines, ln)
 	}
 
+	// Find section headers in the edited content.
 	contentIndex := -1
 	noteIndex := -1
 	for idx, line := range effectiveLines {
