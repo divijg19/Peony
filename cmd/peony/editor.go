@@ -57,7 +57,7 @@ func OpenEditorWithTemplate(initialContent string, initialNote string) (content 
 			continue
 		}
 
-		// Split the editor command into argv. 
+		// Split the editor command into argv.
 		argv := strings.Fields(e)
 		if len(argv) == 0 {
 			continue

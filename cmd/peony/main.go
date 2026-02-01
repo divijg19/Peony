@@ -29,8 +29,9 @@ func PrintHelp() {
          version, -v              Show version
          add, a                   Capture a thought
          view, v                  View the list of thoughts or a thought by id
-         tend, t                  list thoughts which are ready to be tended
-		 release, r				  releases a thought
+         tend, t                  List thoughts which are ready to be tended
+		 release, r				  Clears a thought from peony
+		 evolve, e				  Passes a thought into peony wider integration
 
          Examples:
 		 peony help --view / peony help view
@@ -645,6 +646,105 @@ func cmdRelease(args []string) int {
 	return 0
 }
 
+// cmdEvolve displays evolved thoughts or marks a thought as evolved.
+func cmdEvolve(args []string) int {
+	if len(args) == 0 {
+		st, closeDB, err := openStore()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "evolve: %v\n", err)
+			return 1
+		}
+		defer closeDB()
+
+		reader := bufio.NewReader(os.Stdin)
+		pageSize := 10
+		page := 0
+
+		overview := func(s string) string {
+			s = strings.ReplaceAll(s, "\n", " ")
+			s = strings.TrimSpace(s)
+			const max = 60
+			if len(s) <= max {
+				return s
+			}
+			return s[:max-1] + "…"
+		}
+
+		for {
+			offset := page * pageSize
+			filter := "evolved"
+			thoughts, err := st.FilterViewByPagination(pageSize, offset, filter)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "evolve: %v\n", err)
+				return 1
+			}
+
+			if len(thoughts) == 0 {
+				if page == 0 {
+					fmt.Println("No thoughts yet.")
+					return 0
+				}
+				page--
+				continue
+			}
+
+			fmt.Printf("Page %d\n", page+1)
+			fmt.Printf("%-6s %-10s %-5s %-20s %s\n", "ID", "STATE", "TEND", "UPDATED", "OVERVIEW")
+			for _, th := range thoughts {
+				fmt.Printf("%-6d %-10s %-5d %-20s %s\n",
+					th.ID,
+					th.CurrentState,
+					th.TendCounter,
+					th.UpdatedAt.UTC().Format("2006-01-02 15:04"),
+					overview(th.Content),
+				)
+			}
+
+			fmt.Print("[n]ext, [p]rev, [q]uit: ")
+			line, err := reader.ReadString('\n')
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "evolve: read: %v\n", err)
+				return 1
+			}
+
+			switch strings.ToLower(strings.TrimSpace(line)) {
+			case "q":
+				return 0
+			case "p":
+				if page > 0 {
+					page--
+				}
+			default:
+				if len(thoughts) == pageSize {
+					page++
+				}
+			}
+		}
+	}
+	if len(args) == 1 {
+		id, err := strconv.ParseInt(args[0], 10, 64)
+		if err != nil || id <= 0 {
+			fmt.Fprintln(os.Stderr, "evolve: invalid id")
+			return 2
+		}
+
+		st, closeDB, err := openStore()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "evolve: %v\n", err)
+			return 1
+		}
+		defer closeDB()
+
+		if err := st.ToEvolve(id); err != nil {
+			fmt.Fprintf(os.Stderr, "evolve: %v\n", err)
+			return 1
+		}
+
+		fmt.Printf("Evolved #%d.\n", id)
+	}
+	return 0
+}
+
 // main dispatches CLI commands to their corresponding handlers.
 func main() {
 	args := os.Args[1:]
@@ -688,6 +788,9 @@ func main() {
 
 	case "release", "r":
 		os.Exit(cmdRelease(rest))
+
+	case "evolve", "e":
+		os.Exit(cmdEvolve(rest))
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command: %s\n", cmd)
 		PrintHelp()
