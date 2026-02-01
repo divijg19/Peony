@@ -20,18 +20,19 @@ const Version = "v0.2"
 func PrintHelp() {
 	fmt.Print(
 		`Peony: a calm holding space for unfinished thoughts
-
-         Usage:
-         peony <command> [args]
-
-         Commands:
-         help, h                  Show this help
-         version, -v              Show version
-         add, a                   Capture a thought
-         view, v                  View the list of thoughts or a thought by id
-         tend, t                  List thoughts which are ready to be tended
+		
+		 Usage:
+		 peony <command> [args]
+		 
+		 Commands:
+		 help, h				  Show this help
+		 version, -v			  Show version
+		 add, a					  Capture a thought
+		 view, v				  View the list of thoughts or a thought by id
+		 tend, t				  List thoughts which are ready to be tended
 		 release, r				  Clears a thought from peony
 		 evolve, e				  Passes a thought into peony wider integration
+		 config, c				  View and edit defaults for peony
 
          Examples:
 		 peony help --view / peony help view
@@ -745,7 +746,7 @@ func cmdEvolve(args []string) int {
 	return 0
 }
 
-// main dispatches CLI commands to their corresponding handlers.
+// Main dispatches CLI commands to their corresponding handlers.
 func main() {
 	args := os.Args[1:]
 	if len(args) == 0 {
@@ -753,16 +754,20 @@ func main() {
 		return
 	}
 
+	_, _ = loadRuntimeConfig()
+
 	cmd := args[0]
 	rest := args[1:]
 
-	if cmd != "add" && cmd != "a" && cmd != "tend" && cmd != "t" && cmd != "help" && cmd != "h" && cmd != "version" && cmd != "-v" {
-		// Soft startup notice: print only when the eligible count changes.
-		st, closeDB, err := openStore()
+	// Print only when the eligible count changes.
+	shouldPrintNotice := cmd != "add" && cmd != "a" && cmd != "tend" && cmd != "t" && cmd != "help" && cmd != "h" && cmd != "version" && cmd != "-v"
+	st, closeDB, err := openStore()
+	if err == nil {
+		defer closeDB()
+		n, err := st.CountTendReady()
 		if err == nil {
-			defer closeDB()
-			n, err := st.CountTendReady()
-			if err == nil && n > 0 && st.DidCountTendChange(n) {
+			changed := st.DidCountTendChange(n)
+			if shouldPrintNotice && n > 0 && changed {
 				fmt.Fprintf(os.Stderr, "🌱 %d thoughts feel ready for tending. Run: peony tend\n", n)
 			}
 		}
@@ -791,6 +796,10 @@ func main() {
 
 	case "evolve", "e":
 		os.Exit(cmdEvolve(rest))
+
+	case "configure", "config", "c":
+		os.Exit(cmdConfigure(rest))
+
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command: %s\n", cmd)
 		PrintHelp()
