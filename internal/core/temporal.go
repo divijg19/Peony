@@ -5,7 +5,8 @@ import (
 )
 
 // SettleDuration defines how long a thought must rest before it becomes eligible to be tended.
-const SettleDuration = 18 * time.Hour
+// It can be overridden via configuration.
+var SettleDuration = 18 * time.Hour
 
 // EligibleToSurface reports whether a thought is eligible to be tended at the given time.
 func EligibleToSurface(thought Thought, now time.Time) bool {

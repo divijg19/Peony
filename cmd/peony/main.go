@@ -20,22 +20,24 @@ const Version = "v0.2"
 func PrintHelp() {
 	fmt.Print(
 		`Peony: a calm holding space for unfinished thoughts
-
-         Usage:
-         peony <command> [args]
-
-         Commands:
-         help, h                  Show this help
-         version, -v              Show version
-         add, a                   Capture a thought
-         view, v                  View the list of thoughts or a thought by id
-         tend, t                  list thoughts which are ready to be tended
-
-         Examples:
-		 peony help view
-         peony add "I want to build a log cabin"
-         peony view 12
-		 peony view --archived
+		
+Usage:
+	peony <command> [args]
+		 
+Commands:
+	help, h				  Show this help
+	version, -v			  Show version
+	add, a				  Capture a thought
+	view, v				  View the list of thoughts or a thought by id
+	tend, t				  List thoughts which are ready to be tended
+	release, r			  Clears a thought from peony
+	evolve, e			  Passes a thought into peony wider integration
+	config, c			  View and edit defaults for peony
+Examples:
+	peony help view
+	peony add "I want to build a log cabin"
+	peony view 12
+	peony view --archived
 `)
 }
 
@@ -604,7 +606,150 @@ func promptChoice(reader *bufio.Reader, question string, choices []string) (stri
 	}
 }
 
-// main dispatches CLI commands to their corresponding handlers.
+// cmdRelease permanently removes a thought (and its event history).
+func cmdRelease(args []string) int {
+	if len(args) != 1 {
+		fmt.Fprintln(os.Stderr, "release: usage: `peony release <id>`")
+		return 2
+	}
+
+	id, err := strconv.ParseInt(args[0], 10, 64)
+	if err != nil || id <= 0 {
+		fmt.Fprintln(os.Stderr, "release: invalid id")
+		return 2
+	}
+
+	st, closeDB, err := openStore()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "release: %v\n", err)
+		return 1
+	}
+	defer closeDB()
+
+	reader := bufio.NewReader(os.Stdin)
+	ok, err := promptYesNo(reader, fmt.Sprintf("Release thought #%d? This will delete it.", id))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "release: %v\n", err)
+		return 1
+	}
+	if !ok {
+		return 0
+	}
+
+	if err := st.ReleaseThought(id); err != nil {
+		fmt.Fprintf(os.Stderr, "release: %v\n", err)
+		return 1
+	}
+
+	if err := st.ReindexThoughtIDs(); err != nil {
+		fmt.Fprintf(os.Stderr, "release: reindex ids: %v\n", err)
+		return 1
+	}
+
+	fmt.Printf("Released #%d.\n", id)
+	return 0
+}
+
+// cmdEvolve displays evolved thoughts or marks a thought as evolved.
+func cmdEvolve(args []string) int {
+	if len(args) == 0 {
+		st, closeDB, err := openStore()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "evolve: %v\n", err)
+			return 1
+		}
+		defer closeDB()
+
+		reader := bufio.NewReader(os.Stdin)
+		pageSize := 10
+		page := 0
+
+		overview := func(s string) string {
+			s = strings.ReplaceAll(s, "\n", " ")
+			s = strings.TrimSpace(s)
+			const max = 60
+			if len(s) <= max {
+				return s
+			}
+			return s[:max-1] + "…"
+		}
+
+		for {
+			offset := page * pageSize
+			filter := "evolved"
+			thoughts, err := st.FilterViewByPagination(pageSize, offset, filter)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "evolve: %v\n", err)
+				return 1
+			}
+
+			if len(thoughts) == 0 {
+				if page == 0 {
+					fmt.Println("No thoughts yet.")
+					return 0
+				}
+				page--
+				continue
+			}
+
+			fmt.Printf("Page %d\n", page+1)
+			fmt.Printf("%-6s %-10s %-5s %-20s %s\n", "ID", "STATE", "TEND", "UPDATED", "OVERVIEW")
+			for _, th := range thoughts {
+				fmt.Printf("%-6d %-10s %-5d %-20s %s\n",
+					th.ID,
+					th.CurrentState,
+					th.TendCounter,
+					th.UpdatedAt.UTC().Format("2006-01-02 15:04"),
+					overview(th.Content),
+				)
+			}
+
+			fmt.Print("[n]ext, [p]rev, [q]uit: ")
+			line, err := reader.ReadString('\n')
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "evolve: read: %v\n", err)
+				return 1
+			}
+
+			switch strings.ToLower(strings.TrimSpace(line)) {
+			case "q":
+				return 0
+			case "p":
+				if page > 0 {
+					page--
+				}
+			default:
+				if len(thoughts) == pageSize {
+					page++
+				}
+			}
+		}
+	}
+	if len(args) == 1 {
+		id, err := strconv.ParseInt(args[0], 10, 64)
+		if err != nil || id <= 0 {
+			fmt.Fprintln(os.Stderr, "evolve: invalid id")
+			return 2
+		}
+
+		st, closeDB, err := openStore()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "evolve: %v\n", err)
+			return 1
+		}
+		defer closeDB()
+
+		if err := st.ToEvolve(id); err != nil {
+			fmt.Fprintf(os.Stderr, "evolve: %v\n", err)
+			return 1
+		}
+
+		fmt.Printf("Evolved #%d.\n", id)
+	}
+	return 0
+}
+
+// Main dispatches CLI commands to their corresponding handlers.
 func main() {
 	args := os.Args[1:]
 	if len(args) == 0 {
@@ -612,8 +757,24 @@ func main() {
 		return
 	}
 
+	_, _ = loadRuntimeConfig()
+
 	cmd := args[0]
 	rest := args[1:]
+
+	// Print only when the eligible count changes.
+	shouldPrintNotice := cmd != "add" && cmd != "a" && cmd != "tend" && cmd != "t" && cmd != "help" && cmd != "h" && cmd != "version" && cmd != "-v"
+	st, closeDB, err := openStore()
+	if err == nil {
+		defer closeDB()
+		n, err := st.CountTendReady()
+		if err == nil {
+			changed := st.DidCountTendChange(n)
+			if shouldPrintNotice && n > 0 && changed {
+				fmt.Fprintf(os.Stderr, "🌱 %d thoughts feel ready for tending. Run: peony tend\n", n)
+			}
+		}
+	}
 
 	switch cmd {
 	case "help", "h":
@@ -632,6 +793,15 @@ func main() {
 
 	case "tend", "t":
 		os.Exit(cmdTend(rest))
+
+	case "release", "r":
+		os.Exit(cmdRelease(rest))
+
+	case "evolve", "e":
+		os.Exit(cmdEvolve(rest))
+
+	case "configure", "config", "c":
+		os.Exit(cmdConfigure(rest))
 
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command: %s\n", cmd)

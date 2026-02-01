@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -14,6 +15,8 @@ import (
 type Store struct {
 	db *sql.DB
 }
+
+const appStateKeyLastTendReadyCount = "last_tend_ready_count"
 
 // New returns a Store bound to an existing database handle.
 func New(db *sql.DB) (*Store, error) {
@@ -799,5 +802,345 @@ func (s *Store) TransitionPostTendResolutionStrict(id int64, next core.State, no
 		return fmt.Errorf("post-tend transition: commit: %w", err)
 	}
 
+	return nil
+}
+
+func (s *Store) ToEvolve(id int64) error {
+	if s == nil {
+		return fmt.Errorf("post-tend transition: store is nil")
+	}
+	if s.db == nil {
+		return fmt.Errorf("post-tend transition: db is nil")
+	}
+	if id <= 0 {
+		return fmt.Errorf("post-tend transition: invalid thought ID")
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("to evolve: begin tx: %w", err)
+	}
+	defer func() {
+		_ = tx.Rollback()
+	}()
+
+	var prevStateStr string
+	row := tx.QueryRow(`SELECT current_state FROM thoughts WHERE id = ?`, id)
+	if err := row.Scan(&prevStateStr); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("to evolve: not found")
+		}
+		return fmt.Errorf("to evolve: read current_state: %w", err)
+	}
+
+	prev := core.State(prevStateStr)
+	if prev == core.StateEvolved {
+		return fmt.Errorf("to evolve: thought is in terminal state (%s)", prev)
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	state := core.StateEvolved
+
+	sqlQuery := `UPDATE thoughts
+		 		 SET current_state = ?,
+		     		updated_at = ?
+		 		 WHERE id = ?`
+	res, err := tx.Exec(sqlQuery, state, now, id)
+
+	if err != nil {
+		return fmt.Errorf("to evolve: update thoughts: %w", err)
+	}
+
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("to evolve: rows affected: %w", err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("to evolve: not found")
+	}
+
+	_, err = tx.Exec(`INSERT INTO events (thought_id, kind, at, previous_state, next_state, note) VALUES (?, ?, ?, ?, ?, ?)`, id, "state_change", now, string(prev), string(state), nil)
+	if err != nil {
+		return fmt.Errorf("to evolve: insert event: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("to evolve: commit: %w", err)
+	}
+	return nil
+}
+
+// ReleaseThought permanently deletes a thought and its associated events.
+func (s *Store) ReleaseThought(id int64) error {
+	if s == nil {
+		return fmt.Errorf("release thought: store is nil")
+	}
+	if s.db == nil {
+		return fmt.Errorf("release thought: db is nil")
+	}
+	if id <= 0 {
+		return fmt.Errorf("release thought: invalid thought ID")
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("release thought: begin tx: %w", err)
+	}
+	defer func() {
+		_ = tx.Rollback()
+	}()
+
+	_, err = tx.Exec(`DELETE FROM events WHERE thought_id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("release thought: delete events: %w", err)
+	}
+
+	res, err := tx.Exec(`DELETE FROM thoughts WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("release thought: delete thought: %w", err)
+	}
+
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("release thought: rows affected: %w", err)
+	}
+	if affected == 0 {
+		return fmt.Errorf("release thought: not found")
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("release thought: commit: %w", err)
+	}
+	return nil
+}
+
+// CountTendReady returns the number of thoughts currently eligible for tending.
+func (s *Store) CountTendReady() (int, error) {
+	if s == nil {
+		return 0, fmt.Errorf("count tend ready: store is nil")
+	}
+	if s.db == nil {
+		return 0, fmt.Errorf("count tend ready: db is nil")
+	}
+
+	nowStr := time.Now().UTC().Format(time.RFC3339Nano)
+	var n int
+	err := s.db.QueryRow(
+		`SELECT COUNT(*)
+		 FROM thoughts
+		 WHERE current_state IN (?, ?)
+		   AND eligibility_at <= ?`,
+		string(core.StateCaptured),
+		string(core.StateResting),
+		nowStr,
+	).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("count tend ready: query: %w", err)
+	}
+	return n, nil
+}
+
+// DidCountTendChange returns true when the supplied count differs from the last persisted value.
+// It updates the persisted value on change.
+func (s *Store) DidCountTendChange(newCount int) bool {
+	if s == nil || s.db == nil {
+		return false
+	}
+	if newCount < 0 {
+		return false
+	}
+
+	_ = s.ensureAppStateTable()
+
+	var oldValue string
+	err := s.db.QueryRow(`SELECT value FROM app_state WHERE key = ?`, appStateKeyLastTendReadyCount).Scan(&oldValue)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			_ = s.setAppStateInt(appStateKeyLastTendReadyCount, newCount)
+			return true
+		}
+		return false
+	}
+
+	oldCount, err := strconv.Atoi(strings.TrimSpace(oldValue))
+	if err != nil {
+		_ = s.setAppStateInt(appStateKeyLastTendReadyCount, newCount)
+		return true
+	}
+
+	if oldCount == newCount {
+		return false
+	}
+
+	_ = s.setAppStateInt(appStateKeyLastTendReadyCount, newCount)
+	return true
+}
+
+func (s *Store) ensureAppStateTable() error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("ensure app_state: store/db is nil")
+	}
+	_, err := s.db.Exec(`
+		CREATE TABLE IF NOT EXISTS app_state (
+			key TEXT PRIMARY KEY,
+			value TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		);
+	`)
+	if err != nil {
+		return fmt.Errorf("ensure app_state: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) setAppStateInt(key string, value int) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("set app_state: store/db is nil")
+	}
+	if strings.TrimSpace(key) == "" {
+		return fmt.Errorf("set app_state: empty key")
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	_, err := s.db.Exec(
+		`INSERT INTO app_state(key, value, updated_at)
+		 VALUES (?, ?, ?)
+		 ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+		key,
+		strconv.Itoa(value),
+		now,
+	)
+	if err != nil {
+		return fmt.Errorf("set app_state: upsert: %w", err)
+	}
+	return nil
+}
+
+// ReindexThoughtIDs renumbers thought IDs to be contiguous (1..N) and rewrites event foreign keys.
+// This is a UX nicety for a local-only CLI and is intended to be called after deletions.
+func (s *Store) ReindexThoughtIDs() error {
+	if s == nil {
+		return fmt.Errorf("reindex thought ids: store is nil")
+	}
+	if s.db == nil {
+		return fmt.Errorf("reindex thought ids: db is nil")
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("reindex thought ids: begin tx: %w", err)
+	}
+	defer func() {
+		_ = tx.Rollback()
+	}()
+
+	// Map old IDs to new contiguous IDs.
+	_, err = tx.Exec(`CREATE TEMP TABLE IF NOT EXISTS thought_id_map (old_id INTEGER PRIMARY KEY, new_id INTEGER NOT NULL);`)
+	if err != nil {
+		return fmt.Errorf("reindex thought ids: create map: %w", err)
+	}
+	_, err = tx.Exec(`DELETE FROM thought_id_map;`)
+	if err != nil {
+		return fmt.Errorf("reindex thought ids: clear map: %w", err)
+	}
+	_, err = tx.Exec(`
+		INSERT INTO thought_id_map(old_id, new_id)
+		SELECT id, ROW_NUMBER() OVER (ORDER BY id)
+		FROM thoughts
+		ORDER BY id;
+	`)
+	if err != nil {
+		return fmt.Errorf("reindex thought ids: populate map: %w", err)
+	}
+
+	// Create new tables.
+	_, err = tx.Exec(`
+		CREATE TABLE thoughts_new (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			content TEXT NOT NULL,
+			current_state TEXT NOT NULL,
+			tend_counter INTEGER NOT NULL DEFAULT 0,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			last_tended_at TEXT NULL,
+			eligibility_at TEXT NOT NULL,
+			valence INTEGER NULL,
+			energy INTEGER NULL
+		);
+	`)
+	if err != nil {
+		return fmt.Errorf("reindex thought ids: create thoughts_new: %w", err)
+	}
+
+	_, err = tx.Exec(`
+		CREATE TABLE events_new (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			thought_id INTEGER NOT NULL,
+			kind TEXT NOT NULL,
+			at TEXT NOT NULL,
+			previous_state TEXT NULL,
+			next_state TEXT NULL,
+			note TEXT NULL,
+			FOREIGN KEY(thought_id) REFERENCES thoughts_new(id)
+		);
+	`)
+	if err != nil {
+		return fmt.Errorf("reindex thought ids: create events_new: %w", err)
+	}
+
+	// Copy data with remapped IDs.
+	_, err = tx.Exec(`
+		INSERT INTO thoughts_new (id, content, current_state, tend_counter, created_at, updated_at, last_tended_at, eligibility_at, valence, energy)
+		SELECT m.new_id, t.content, t.current_state, t.tend_counter, t.created_at, t.updated_at, t.last_tended_at, t.eligibility_at, t.valence, t.energy
+		FROM thoughts t
+		JOIN thought_id_map m ON m.old_id = t.id
+		ORDER BY m.new_id;
+	`)
+	if err != nil {
+		return fmt.Errorf("reindex thought ids: copy thoughts: %w", err)
+	}
+
+	_, err = tx.Exec(`
+		INSERT INTO events_new (id, thought_id, kind, at, previous_state, next_state, note)
+		SELECT e.id, m.new_id, e.kind, e.at, e.previous_state, e.next_state, e.note
+		FROM events e
+		JOIN thought_id_map m ON m.old_id = e.thought_id
+		ORDER BY e.id;
+	`)
+	if err != nil {
+		return fmt.Errorf("reindex thought ids: copy events: %w", err)
+	}
+
+	// Drop old tables and swap in the new ones.
+	_, err = tx.Exec(`DROP TABLE events;`)
+	if err != nil {
+		return fmt.Errorf("reindex thought ids: drop events: %w", err)
+	}
+	_, err = tx.Exec(`DROP TABLE thoughts;`)
+	if err != nil {
+		return fmt.Errorf("reindex thought ids: drop thoughts: %w", err)
+	}
+
+	_, err = tx.Exec(`ALTER TABLE thoughts_new RENAME TO thoughts;`)
+	if err != nil {
+		return fmt.Errorf("reindex thought ids: rename thoughts: %w", err)
+	}
+	_, err = tx.Exec(`ALTER TABLE events_new RENAME TO events;`)
+	if err != nil {
+		return fmt.Errorf("reindex thought ids: rename events: %w", err)
+	}
+
+	// Recreate indexes.
+	_, err = tx.Exec(`CREATE INDEX IF NOT EXISTS idx_thoughts_state_eligibility ON thoughts(current_state, eligibility_at);`)
+	if err != nil {
+		return fmt.Errorf("reindex thought ids: create idx_thoughts_state_eligibility: %w", err)
+	}
+	_, err = tx.Exec(`CREATE INDEX IF NOT EXISTS idx_events_thought_id_at ON events(thought_id, at);`)
+	if err != nil {
+		return fmt.Errorf("reindex thought ids: create idx_events_thought_id_at: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("reindex thought ids: commit: %w", err)
+	}
 	return nil
 }
