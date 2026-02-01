@@ -1020,3 +1020,68 @@ func (s *Store) TransitionPostTendResolutionStrict(id int64, next core.State, no
 
 	return nil
 }
+
+func (s *Store) ToEvolve(id int64) error {
+	if s == nil {
+		return fmt.Errorf("post-tend transition: store is nil")
+	}
+	if s.db == nil {
+		return fmt.Errorf("post-tend transition: db is nil")
+	}
+	if id <= 0 {
+		return fmt.Errorf("post-tend transition: invalid thought ID")
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("to evolve: begin tx: %w", err)
+	}
+	defer func() {
+		_ = tx.Rollback()
+	}()
+
+	var prevStateStr string
+	row := tx.QueryRow(`SELECT current_state FROM thoughts WHERE id = ?`, id)
+	if err := row.Scan(&prevStateStr); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("to evolve: not found")
+		}
+		return fmt.Errorf("to evolve: read current_state: %w", err)
+	}
+
+	prev := core.State(prevStateStr)
+	if prev == core.StateEvolved {
+		return fmt.Errorf("to evolve: thought is in terminal state (%s)", prev)
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	state := core.StateEvolved
+
+	sqlQuery := `UPDATE thoughts
+		 		 SET current_state = ?,
+		     		updated_at = ?
+		 		 WHERE id = ?`
+	res, err := tx.Exec(sqlQuery, state, now, id)
+
+	if err != nil {
+		return fmt.Errorf("to evolve: update thoughts: %w", err)
+	}
+
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("to evolve: rows affected: %w", err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("to evolve: not found")
+	}
+
+	_, err = tx.Exec(`INSERT INTO events (thought_id, kind, at, previous_state, next_state, note) VALUES (?, ?, ?, ?, ?, ?)`, id, "state_change", now, string(prev), string(state), nil)
+	if err != nil {
+		return fmt.Errorf("to evolve: insert event: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("to evolve: commit: %w", err)
+	}
+	return nil
+}
