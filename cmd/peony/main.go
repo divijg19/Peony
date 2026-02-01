@@ -30,14 +30,13 @@ func PrintHelp() {
          add, a                   Capture a thought
          view, v                  View the list of thoughts or a thought by id
          tend, t                  list thoughts which are ready to be tended
-		 release, r				  releases a thought
 
          Examples:
-		 peony help --view / peony help view
-		 peony add "I want to build a log cabin"
-		 peony view 12
-		 peony view --archived / peony view archived
-	`)
+		 peony help view
+         peony add "I want to build a log cabin"
+         peony view 12
+		 peony view --archived
+`)
 }
 
 // openStore opens the SQLite-backed store and returns a close function.
@@ -244,7 +243,7 @@ func cmdView(args []string) int {
 				if eligible {
 					fmt.Println("Eligible: yes")
 				} else {
-					fmt.Printf("Eligible for tend: %s (at %s)\n", formatRelative(thought.EligibilityAt, now), formatShortUTC(thought.EligibilityAt))
+					fmt.Printf("Eligible: %s (at %s)\n", formatRelative(thought.EligibilityAt, now), formatShortUTC(thought.EligibilityAt))
 				}
 			case core.StateTended:
 				fmt.Println("Needs resolution: rest/evolve/release/archive")
@@ -483,15 +482,10 @@ func cmdTend(args []string) int {
 		}
 		defer closeDB()
 
-		thought, _, err := st.GetThought(id)
+		thought, _, err := st.GetTendThought(id)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "tend: %v\n", err)
 			return 1
-		}
-
-		if thought.CurrentState == core.StateEvolved || thought.CurrentState == core.StateReleased || thought.CurrentState == core.StateArchived {
-			fmt.Fprintf(os.Stderr, "tend: thought #%d is terminal (%s)\n", id, thought.CurrentState)
-			return 2
 		}
 
 		reader := bufio.NewReader(os.Stdin)
@@ -500,6 +494,15 @@ func cmdTend(args []string) int {
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "tend: edit: %v\n", err)
 			return 1
+		}
+
+		ok, err := promptYesNo(reader, "Are you satisfied with the changes?")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "tend: %v\n", err)
+			return 1
+		}
+		if !ok {
+			return 0
 		}
 
 		mark, err := promptYesNo(reader, "Do you want to mark this thought as tended? (Your note will be saved only if you say yes.)")
@@ -601,50 +604,6 @@ func promptChoice(reader *bufio.Reader, question string, choices []string) (stri
 	}
 }
 
-// cmdRelease permanently removes a thought (and its event history).
-func cmdRelease(args []string) int {
-	if len(args) != 1 {
-		fmt.Fprintln(os.Stderr, "release: usage: `peony release <id>`")
-		return 2
-	}
-
-	id, err := strconv.ParseInt(args[0], 10, 64)
-	if err != nil || id <= 0 {
-		fmt.Fprintln(os.Stderr, "release: invalid id")
-		return 2
-	}
-
-	st, closeDB, err := openStore()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "release: %v\n", err)
-		return 1
-	}
-	defer closeDB()
-
-	reader := bufio.NewReader(os.Stdin)
-	ok, err := promptYesNo(reader, fmt.Sprintf("Release thought #%d? This will delete it.", id))
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "release: %v\n", err)
-		return 1
-	}
-	if !ok {
-		return 0
-	}
-
-	if err := st.ReleaseThought(id); err != nil {
-		fmt.Fprintf(os.Stderr, "release: %v\n", err)
-		return 1
-	}
-
-	if err := st.ReindexThoughtIDs(); err != nil {
-		fmt.Fprintf(os.Stderr, "release: reindex ids: %v\n", err)
-		return 1
-	}
-
-	fmt.Printf("Released #%d.\n", id)
-	return 0
-}
-
 // main dispatches CLI commands to their corresponding handlers.
 func main() {
 	args := os.Args[1:]
@@ -655,18 +614,6 @@ func main() {
 
 	cmd := args[0]
 	rest := args[1:]
-
-	if cmd != "add" && cmd != "a" && cmd != "tend" && cmd != "t" && cmd != "help" && cmd != "h" && cmd != "version" && cmd != "-v" {
-		// Soft startup notice: print only when the eligible count changes.
-		st, closeDB, err := openStore()
-		if err == nil {
-			defer closeDB()
-			n, err := st.CountTendReady()
-			if err == nil && n > 0 && st.DidCountTendChange(n) {
-				fmt.Fprintf(os.Stderr, "🌱 %d thoughts feel ready for tending. Run: peony tend\n", n)
-			}
-		}
-	}
 
 	switch cmd {
 	case "help", "h":
@@ -686,8 +633,6 @@ func main() {
 	case "tend", "t":
 		os.Exit(cmdTend(rest))
 
-	case "release", "r":
-		os.Exit(cmdRelease(rest))
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command: %s\n", cmd)
 		PrintHelp()
