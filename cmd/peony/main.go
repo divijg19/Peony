@@ -21,25 +21,24 @@ func PrintHelp() {
 	fmt.Print(
 		`Peony: a calm holding space for unfinished thoughts
 		
-		 Usage:
-		 peony <command> [args]
+Usage:
+	peony <command> [args]
 		 
-		 Commands:
-		 help, h				  Show this help
-		 version, -v			  Show version
-		 add, a					  Capture a thought
-		 view, v				  View the list of thoughts or a thought by id
-		 tend, t				  List thoughts which are ready to be tended
-		 release, r				  Clears a thought from peony
-		 evolve, e				  Passes a thought into peony wider integration
-		 config, c				  View and edit defaults for peony
-
-         Examples:
-		 peony help --view / peony help view
-		 peony add "I want to build a log cabin"
-		 peony view 12
-		 peony view --archived / peony view archived
-	`)
+Commands:
+	help, h				  Show this help
+	version, -v			  Show version
+	add, a				  Capture a thought
+	view, v				  View the list of thoughts or a thought by id
+	tend, t				  List thoughts which are ready to be tended
+	release, r			  Clears a thought from peony
+	evolve, e			  Passes a thought into peony wider integration
+	config, c			  View and edit defaults for peony
+Examples:
+	peony help view
+	peony add "I want to build a log cabin"
+	peony view 12
+	peony view --archived
+`)
 }
 
 // openStore opens the SQLite-backed store and returns a close function.
@@ -246,7 +245,7 @@ func cmdView(args []string) int {
 				if eligible {
 					fmt.Println("Eligible: yes")
 				} else {
-					fmt.Printf("Eligible for tend: %s (at %s)\n", formatRelative(thought.EligibilityAt, now), formatShortUTC(thought.EligibilityAt))
+					fmt.Printf("Eligible: %s (at %s)\n", formatRelative(thought.EligibilityAt, now), formatShortUTC(thought.EligibilityAt))
 				}
 			case core.StateTended:
 				fmt.Println("Needs resolution: rest/evolve/release/archive")
@@ -485,15 +484,10 @@ func cmdTend(args []string) int {
 		}
 		defer closeDB()
 
-		thought, _, err := st.GetThought(id)
+		thought, _, err := st.GetTendThought(id)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "tend: %v\n", err)
 			return 1
-		}
-
-		if thought.CurrentState == core.StateEvolved || thought.CurrentState == core.StateReleased || thought.CurrentState == core.StateArchived {
-			fmt.Fprintf(os.Stderr, "tend: thought #%d is terminal (%s)\n", id, thought.CurrentState)
-			return 2
 		}
 
 		reader := bufio.NewReader(os.Stdin)
@@ -502,6 +496,15 @@ func cmdTend(args []string) int {
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "tend: edit: %v\n", err)
 			return 1
+		}
+
+		ok, err := promptYesNo(reader, "Are you satisfied with the changes?")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "tend: %v\n", err)
+			return 1
+		}
+		if !ok {
+			return 0
 		}
 
 		mark, err := promptYesNo(reader, "Do you want to mark this thought as tended? (Your note will be saved only if you say yes.)")

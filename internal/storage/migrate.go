@@ -6,7 +6,7 @@ import (
 )
 
 // SchemaVersion is the latest schema version supported by the migrator.
-const SchemaVersion = 1
+const SchemaVersion = 2
 
 // Migrate ensures the SQLite schema exists and is upgraded to SchemaVersion.
 func Migrate(db *sql.DB) error {
@@ -72,6 +72,17 @@ func Migrate(db *sql.DB) error {
 	`)
 	if err != nil {
 		return fmt.Errorf("migrate: create events table: %w", err)
+	}
+
+	_, err = transaction.Exec(`
+		CREATE TABLE IF NOT EXISTS app_state (
+			key TEXT PRIMARY KEY,
+			value TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		);
+	`)
+	if err != nil {
+		return fmt.Errorf("migrate: create app_state table: %w", err)
 	}
 
 	_, err = transaction.Exec(`CREATE INDEX IF NOT EXISTS idx_thoughts_state_eligibility ON thoughts(current_state, eligibility_at);`)

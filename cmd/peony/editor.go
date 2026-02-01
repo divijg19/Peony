@@ -76,7 +76,6 @@ func OpenEditorWithTemplate(initialContent string, initialNote string) (content 
 	// NoteHeader marks the start of the optional note section in the editor template.
 	NoteHeader := "--- note ---"
 
-	// CreateTemp writes the editable template to a temporary file.
 	file, err := os.CreateTemp("", "peonyTend.txt")
 	if err != nil {
 		return nil, nil, err
@@ -84,7 +83,6 @@ func OpenEditorWithTemplate(initialContent string, initialNote string) (content 
 	path := file.Name()
 
 	defer func() {
-		// Best-effort cleanup of the temp file.
 		os.Remove(path)
 	}()
 
@@ -131,8 +129,6 @@ func OpenEditorWithTemplate(initialContent string, initialNote string) (content 
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-
-	// cmd.Run blocks until the editor process exits.
 	err = cmd.Run()
 	if err != nil {
 		return nil, nil, err
@@ -150,7 +146,6 @@ func OpenEditorWithTemplate(initialContent string, initialNote string) (content 
 		lines = append(lines, strings.TrimRight(ln, "\r"))
 	}
 
-	// stripTemplateLine removes comment-only lines from the template.
 	stripTemplateLine := func(line string) (string, bool) {
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmed, "//") {
@@ -167,7 +162,6 @@ func OpenEditorWithTemplate(initialContent string, initialNote string) (content 
 		effectiveLines = append(effectiveLines, ln)
 	}
 
-	// Find section headers in the edited content.
 	contentIndex := -1
 	noteIndex := -1
 	for idx, line := range effectiveLines {
