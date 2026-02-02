@@ -14,32 +14,36 @@ import (
 )
 
 // Version is the current CLI version string.
-const Version = "v0.2"
+const Version = "v0.4"
 
 // PrintHelp prints the CLI usage and examples.
 func PrintHelp() {
-	fmt.Print(
-		`Peony: a calm holding space for unfinished thoughts
-		
-		 Usage:
-		 peony <command> [args]
-		 
-		 Commands:
-		 help, h				  Show this help
-		 version, -v			  Show version
-		 add, a					  Capture a thought
-		 view, v				  View the list of thoughts or a thought by id
-		 tend, t				  List thoughts which are ready to be tended
-		 release, r				  Clears a thought from peony
-		 evolve, e				  Passes a thought into peony wider integration
-		 config, c				  View and edit defaults for peony
+	fmt.Print(`Peony: a calm holding space for unfinished thoughts
 
-         Examples:
-		 peony help --view / peony help view
-		 peony add "I want to build a log cabin"
-		 peony view 12
-		 peony view --archived / peony view archived
-	`)
+Usage:
+  peony <command> [args]
+
+Commands:
+  help, h        Show this help or detailed help for a command
+  version, -v    Show version
+  add, a         Capture a thought
+  view, v        View the list of thoughts or a thought by id
+  tend, t        List thoughts which are ready to be tended
+  release, r     Clears a thought from peony
+  evolve, e      Passes a thought into peony wider integration
+  config, c      View and edit defaults for peony
+
+Examples:
+  peony add <content>
+  peony view <id>
+  peony view <filter>
+  peony tend <id>
+  peony config <setting>
+
+For detailed help on a command:
+  peony help <command>
+
+`)
 }
 
 // openStore opens the SQLite-backed store and returns a close function.
@@ -746,6 +750,136 @@ func cmdEvolve(args []string) int {
 	return 0
 }
 
+func cmdHelp(args []string) int {
+	if len(args) == 0 {
+		PrintHelp()
+		return 0
+	}
+
+	topic := strings.TrimPrefix(args[0], "--")
+
+	switch topic {
+	case "add", "-add":
+		fmt.Print(`peony add — capture a thought
+
+Description:
+  Captures a new thought and stores it in the captured state.
+  The thought will rest for a configured duration before becoming eligible to tend.
+
+Syntax:
+  peony add [content]
+  peony a [content]
+
+Examples:
+  peony add "I wonder if I should learn Rust"
+  peony add
+  (prompts interactively if no content provided)
+
+`)
+
+	case "view", "--view":
+		fmt.Print(`peony view — view thoughts
+
+Description:
+  View a paginated list of thoughts, a single thought by ID, or filter by state.
+  Without arguments, shows all non-archived thoughts.
+
+Syntax:
+  peony view [id]
+  peony view [--filter | filter]
+  peony v [id]
+
+Filters:
+  captured, resting, tended, evolved, released, archived
+
+Examples:
+  peony view
+  peony view 12
+  peony view --archived
+  peony view captured
+
+`)
+
+	case "tend", "--tend":
+		fmt.Print(`peony tend — work with thoughts ready for tending
+
+Description:
+  Lists thoughts that are eligible to tend, or opens an interactive editor
+  to tend a specific thought by ID.
+
+Syntax:
+  peony tend [id]
+  peony t [id]
+
+Examples:
+  peony tend
+  peony tend 5
+
+`)
+
+	case "release", "--release":
+		fmt.Print(`peony release — remove a thought permanently
+
+Description:
+  Permanently deletes a thought and its event history from Peony.
+  This action cannot be undone.
+
+Syntax:
+  peony release <id>
+  peony r <id>
+
+Examples:
+  peony release 8
+  peony r 3
+
+`)
+
+	case "evolve", "--evolve":
+		fmt.Print(`peony evolve — mark a thought as evolved
+
+Description:
+  Transitions a thought into the evolved state, indicating it has been
+  integrated into your wider workflow (e.g., a task manager or notes app).
+
+Syntax:
+  peony evolve [id]
+  peony e [id]
+
+Examples:
+  peony evolve 7
+  peony e
+  (lists evolved thoughts if no ID provided)
+
+`)
+
+	case "config", "--config":
+		fmt.Print(`peony config — view and configure defaults
+
+Description:
+  View or update configuration settings like editor and settle duration.
+
+Syntax:
+  peony config
+  peony c
+  peony config [--editor | editor]
+  peony config [--settleDuration | settleDuration] 
+
+Examples:
+  peony config
+  peony config --editor
+  peony config settleDuration 24h
+  peony c settleDuration
+
+`)
+
+	default:
+		fmt.Fprintf(os.Stderr, "No help available for: %s\n", args[0])
+		PrintHelp()
+		return 2
+	}
+	return 0
+}
+
 // Main dispatches CLI commands to their corresponding handlers.
 func main() {
 	args := os.Args[1:]
@@ -775,7 +909,7 @@ func main() {
 
 	switch cmd {
 	case "help", "h":
-		PrintHelp()
+		os.Exit(cmdHelp(rest))
 		return
 
 	case "version", "-v":
@@ -797,7 +931,7 @@ func main() {
 	case "evolve", "e":
 		os.Exit(cmdEvolve(rest))
 
-	case "configure", "config", "c":
+	case "config", "c":
 		os.Exit(cmdConfigure(rest))
 
 	default:
