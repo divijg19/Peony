@@ -900,9 +900,11 @@ func main() {
 		defer closeDB()
 		n, err := st.CountTendReady()
 		if err == nil {
-			changed := st.DidCountTendChange(n)
-			if shouldPrintNotice && n > 0 && changed {
-				fmt.Fprintf(os.Stderr, "🌱 %d thoughts feel ready for tending. Run: peony tend\n", n)
+			if shouldPrintNotice && n > 0 {
+				changed := st.DidCountTendChange(n)
+				if changed {
+					fmt.Fprintf(os.Stderr, "🌱 %d thoughts feel ready for tending. Run: peony tend\n", n)
+				}
 			}
 		}
 	}
