@@ -6,8 +6,6 @@ import (
 
 // State represents the lifecycle state of a thought.
 type State string
-
-// Known lifecycle states for thoughts.
 const (
 	StateCaptured State = "captured"
 	StateResting  State = "resting"
