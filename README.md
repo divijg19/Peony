@@ -253,10 +253,10 @@ Feature creep is intentionally resisted.
 
 ## Roadmap (High Level)
 
-* [x] v0.1 — Core CLI, lifecycle, local storage
-* [x] v0.2 — 
-* [x] v0.3 — Optional reflection aids (non-directive)
-* [x] v0.4 — 
+* [x] v0.1 — Core CLI, lifecycle, local sqlite storage, entry function, add & view commands
+* [x] v0.2 — CLI pagination, view and pagination filters, tend command
+* [x] v0.3 — Database re-design for temporal context, tend notifications, tend visual and terminal editor implementation, config settings for tend time and editor choice, evolve
+* [x] v0.4 — Archive, Release, solidified tend notification consistency
 * [x] v0.5 — CLI polish, user feedback iteration
 * [ ] v0.6 — Read-only frontend (Eden integration)
 ~
