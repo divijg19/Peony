@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ri5hii/peony/internal/config"
-	"github.com/ri5hii/peony/internal/core"
+	"github.com/divijg19/peony/internal/config"
+	"github.com/divijg19/peony/internal/core"
 )
 
 var (

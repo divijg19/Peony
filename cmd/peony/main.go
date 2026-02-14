@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ri5hii/peony/internal/core"
-	"github.com/ri5hii/peony/internal/storage"
+	"github.com/divijg19/peony/internal/core"
+	"github.com/divijg19/peony/internal/storage"
 )
 
 // Version is the current CLI version string.

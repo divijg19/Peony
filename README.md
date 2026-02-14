@@ -71,7 +71,7 @@ Your inner life is not a dataset.
 
 The fundamental object in `Peony`.
 
-A Cognitive Unit can represent:
+A Cognitive Unit(CU) can represent:
 
 * an unresolved decision
 * a lingering worry
@@ -128,7 +128,7 @@ Commands are designed to feel **inviting**, not mechanical.
 
 ---
 
-## CLI Commands (Planned)
+## CLI Commands
 
 * `add` — capture a thought gently
 * `tend` — surface thoughts ready for reflection
@@ -137,6 +137,8 @@ Commands are designed to feel **inviting**, not mechanical.
 * `evolve` — convert into a task / note (external)
 * `release` — let go without guilt
 * `archive` — long-term memory
+
+### Planned for the frontend Eden integration, not CLI:
 * `garden` — high-level overview
 
 ---
@@ -213,7 +215,7 @@ The frontend exists to **help you see**, not manage.
 * No telemetry
 * Your data lives with you
 
-`Peony` should still work the same way in ten years.
+`Peony` will still work the same way in ten years.
 
 ---
 
@@ -238,7 +240,7 @@ It is especially suited for:
 
 ## Project Status
 
-`Peony` is in **early development**.
+`Peony` is **pre-frontend, CLI-complete**.
 The focus is on:
 
 * core lifecycle correctness
@@ -251,9 +253,15 @@ Feature creep is intentionally resisted.
 
 ## Roadmap (High Level)
 
-* v0.1 — Core CLI, lifecycle, local storage
-* v0.2 — Read-only frontend
-* v0.3 — Optional reflection aids (non-directive)
+* [x] v0.1 — Core CLI, lifecycle, local storage
+* [x] v0.2 — 
+* [x] v0.3 — Optional reflection aids (non-directive)
+* [x] v0.4 — 
+* [x] v0.5 — CLI polish, user feedback iteration
+* [ ] v0.6 — Read-only frontend (Eden integration)
+~
+* [ ] v0.7 — Frontend polish and interactivity, user feedback iteration
+* [ ] v1.0+ — Optional Semantic AI integration (non-prescriptive, reflective only)
 
 AI integration, if ever added, will be:
 

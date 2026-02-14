@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ri5hii/peony/internal/core"
+	"github.com/divijg19/peony/internal/core"
 )
 
 // Store provides SQLite-backed persistence for thoughts and events.
@@ -703,7 +703,6 @@ func (s *Store) MarkThoughtTended(id int64, note *string) error {
 	}
 	return nil
 }
-
 
 // TransitionPostTendResolutionStrict transitions a tended thought into resting or a terminal state and appends exactly one event.
 func (s *Store) TransitionPostTendResolutionStrict(id int64, next core.State, note *string) error {
