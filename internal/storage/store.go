@@ -807,13 +807,13 @@ func (s *Store) TransitionPostTendResolutionStrict(id int64, next core.State, no
 
 func (s *Store) ToEvolve(id int64) error {
 	if s == nil {
-		return fmt.Errorf("post-tend transition: store is nil")
+		return fmt.Errorf("to evolve: store is nil")
 	}
 	if s.db == nil {
-		return fmt.Errorf("post-tend transition: db is nil")
+		return fmt.Errorf("to evolve: db is nil")
 	}
 	if id <= 0 {
-		return fmt.Errorf("post-tend transition: invalid thought ID")
+		return fmt.Errorf("to evolve: invalid thought ID")
 	}
 
 	tx, err := s.db.Begin()
