@@ -6,6 +6,30 @@
 
 ---
 
+Quick install (release binaries):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/divijg19/peony/main/install.sh | bash
+```
+
+Release archives install both:
+
+* `peony` — the primary CLI
+* `bloom` — the standalone TUI entrypoint, equivalent to `peony tui`
+
+To also add an optional shell function for `bloom` during install:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/divijg19/peony/main/install.sh | bash -s -- --alias --shell bash
+```
+
+```bash
+peony tui
+bloom
+```
+
+---
+
 ## What is `Peony`?
 
 `Peony` is a **local-first, humane CLI application** designed to help you capture, tend, and gently resolve half-formed thoughts—without forcing them into tasks, deadlines, or artificial structure.
@@ -108,18 +132,18 @@ Nothing ever “fails.”
 ### Example interactions
 
 ```bash
-`Peony` add
+peony add
 > What’s on your mind?
 > "Unsure whether to double down on Go or consolidate Python first."
 ```
 
 ```bash
-`Peony` tend
+peony tend
 🌱 2 thoughts feel ready for reflection today.
 ```
 
 ```bash
-`Peony` view
+peony view
 🌸 This thought has been resting for 14 days.
 🌿 You last touched it late at night.
 ```
@@ -137,9 +161,18 @@ Commands are designed to feel **inviting**, not mechanical.
 * `evolve` — convert into a task / note (external)
 * `release` — let go without guilt
 * `archive` — long-term memory
+* `tui` — open the full-screen terminal garden
 
-### Planned for the frontend Eden integration, not CLI:
-* `garden` — high-level overview
+## TUI: Bloom
+
+`Bloom` is Peony's keyboard-first terminal garden.
+
+```bash
+peony tui
+bloom
+```
+
+It opens to a Garden Inbox with thoughts ready to tend, recent resting thoughts, and a detail pane for context and event history. From there you can capture, tend, rest, evolve, archive, search, filter, reload, and permanently release thoughts without leaving the terminal.
 
 ---
 
@@ -168,13 +201,15 @@ The frontend exists to **help you see**, not manage.
 ## Architecture Overview
 
 ```
-`Peony`
+Peony
 ├── Core Engine (Go)
 │   ├── Thought lifecycle
 │   ├── Temporal logic
 │   └── Language system
 │
 ├── CLI Interface
+│
+├── TUI Interface
 │   └── Bubble Tea + Lip Gloss
 │
 ├── Storage
@@ -194,7 +229,7 @@ The frontend exists to **help you see**, not manage.
 * **Go** — clarity, longevity, low cognitive overhead
 * **SQLite** — durable, portable local storage
 
-### CLI
+### TUI
 
 * **Bubble Tea** — calm, state-driven terminal UX
 * **Lip Gloss** — intentional visual hierarchy
@@ -251,17 +286,18 @@ Feature creep is intentionally resisted.
 
 ---
 
-## Roadmap (High Level)
+## Roadmap
 
-* [x] v0.1 — Core CLI, lifecycle, local sqlite storage, entry function, add & view commands
-* [x] v0.2 — CLI pagination, view and pagination filters, tend command
-* [x] v0.3 — Database re-design for temporal context, tend notifications, tend visual and terminal editor implementation, config settings for tend time and editor choice, evolve
-* [x] v0.4 — Archive, Release, solidified tend notification consistency
-* [x] v0.5 — CLI polish, user feedback iteration
-* [ ] v0.6 — Read-only frontend (Eden integration)
+* [x] v0.1 - Core CLI, lifecycle, local sqlite storage, entry function, add & view commands
+* [x] v0.2 - CLI pagination, view and pagination filters, tend command
+* [x] v0.3 - Database re-design for temporal context, tend notifications, tend visual and terminal editor implementation, config settings for tend time and editor choice, evolve
+* [x] v0.4 - Archive, Release, solidified tend notification consistency
+* [x] v0.5 - CLI polish, user feedback iteration
+* [ ] v0.6 - TUI frontend
 ~
-* [ ] v0.7 — Frontend polish and interactivity, user feedback iteration
-* [ ] v1.0+ — Optional Semantic AI integration (non-prescriptive, reflective only)
+* [ ] v0.7 - Read-only WebUI frontend (Eden integration)
+* [ ] v0.8 - Frontend polish and interactivity, user feedback iteration
+* [ ] v1.0+ - Optional Semantic AI integration (non-prescriptive, reflective only)
 
 AI integration, if ever added, will be:
 
@@ -271,7 +307,7 @@ AI integration, if ever added, will be:
 
 ---
 
-## Why “`Peony`”?
+## Why `Peony`?
 
 Peonies bloom slowly.
 They do not rush, yet they are unmistakably full.

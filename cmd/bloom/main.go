@@ -7,5 +7,5 @@ import (
 )
 
 func main() {
-	os.Exit(cli.RunPeony(os.Args[1:]))
+	os.Exit(cli.RunBloom(os.Args[1:]))
 }
