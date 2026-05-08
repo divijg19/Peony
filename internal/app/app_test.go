@@ -1,0 +1,134 @@
+package app
+
+import (
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/divijg19/peony/internal/core"
+	"github.com/divijg19/peony/internal/storage"
+)
+
+func newTestService(t *testing.T) *Service {
+	t.Helper()
+	db, err := storage.Open(filepath.Join(t.TempDir(), "peony.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = db.Close()
+	})
+	service, err := NewForDB(db)
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	return service
+}
+
+func withSettleDuration(t *testing.T, duration time.Duration) {
+	t.Helper()
+	previous := core.SettleDuration
+	core.SettleDuration = duration
+	t.Cleanup(func() {
+		core.SettleDuration = previous
+	})
+}
+
+func TestCaptureSnapshotAndSearch(t *testing.T) {
+	withSettleDuration(t, 0)
+	service := newTestService(t)
+
+	firstID, err := service.Capture("  learn softer terminal design  ")
+	if err != nil {
+		t.Fatalf("capture first: %v", err)
+	}
+	if firstID != 1 {
+		t.Fatalf("first id = %d, want 1", firstID)
+	}
+	if _, err := service.Capture("plan a small release"); err != nil {
+		t.Fatalf("capture second: %v", err)
+	}
+
+	snapshot, err := service.Snapshot("", "soft")
+	if err != nil {
+		t.Fatalf("snapshot: %v", err)
+	}
+	if snapshot.ReadyCount != 2 {
+		t.Fatalf("ready count = %d, want 2", snapshot.ReadyCount)
+	}
+	if len(snapshot.Thoughts) != 1 {
+		t.Fatalf("filtered thoughts = %d, want 1", len(snapshot.Thoughts))
+	}
+	if snapshot.Thoughts[0].Thought.Content != "learn softer terminal design" {
+		t.Fatalf("content was not trimmed: %q", snapshot.Thoughts[0].Thought.Content)
+	}
+	if !snapshot.Thoughts[0].Ready {
+		t.Fatal("captured thought should be ready when settle duration is zero")
+	}
+}
+
+func TestTendRestEvolveArchiveAndRelease(t *testing.T) {
+	withSettleDuration(t, 0)
+	service := newTestService(t)
+
+	firstID, err := service.Capture("first thought")
+	if err != nil {
+		t.Fatalf("capture first: %v", err)
+	}
+	secondID, err := service.Capture("second thought")
+	if err != nil {
+		t.Fatalf("capture second: %v", err)
+	}
+	thirdID, err := service.Capture("third thought")
+	if err != nil {
+		t.Fatalf("capture third: %v", err)
+	}
+
+	note := "made it clearer"
+	if err := service.Tend(firstID, "first thought, revised", &note); err != nil {
+		t.Fatalf("tend: %v", err)
+	}
+	snapshot, err := service.Snapshot(core.StateTended, "")
+	if err != nil {
+		t.Fatalf("snapshot tended: %v", err)
+	}
+	if len(snapshot.Thoughts) != 1 || snapshot.Thoughts[0].Thought.Content != "first thought, revised" {
+		t.Fatalf("unexpected tended snapshot: %+v", snapshot.Thoughts)
+	}
+
+	if err := service.Rest(firstID, nil); err != nil {
+		t.Fatalf("rest: %v", err)
+	}
+	snapshot, err = service.Snapshot(core.StateResting, "")
+	if err != nil {
+		t.Fatalf("snapshot resting: %v", err)
+	}
+	if len(snapshot.Thoughts) != 1 || snapshot.Thoughts[0].Thought.ID != firstID {
+		t.Fatalf("rested thought missing: %+v", snapshot.Thoughts)
+	}
+
+	if err := service.Evolve(secondID); err != nil {
+		t.Fatalf("evolve: %v", err)
+	}
+	if err := service.Archive(thirdID); err != nil {
+		t.Fatalf("archive: %v", err)
+	}
+	if err := service.ReleasePermanent(secondID); err != nil {
+		t.Fatalf("release permanent: %v", err)
+	}
+
+	snapshot, err = service.Snapshot("", "")
+	if err != nil {
+		t.Fatalf("snapshot all: %v", err)
+	}
+	if len(snapshot.Thoughts) != 2 {
+		t.Fatalf("thought count after release = %d, want 2", len(snapshot.Thoughts))
+	}
+	ids := map[int64]bool{}
+	for _, item := range snapshot.Thoughts {
+		ids[item.Thought.ID] = true
+	}
+	if !ids[1] || !ids[2] {
+		t.Fatalf("ids after reindex = %#v, want 1 and 2", ids)
+	}
+}
