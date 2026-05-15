@@ -18,14 +18,13 @@ Usage:
 
 Options:
   --version TAG              Install a specific release tag. Defaults to the latest release.
-  --bin-dir DIR              Install peony and bloom into DIR. Defaults to ~/.local/bin.
+  --bin-dir DIR              Install peony into DIR. Defaults to ~/.local/bin.
   --alias                    Append an optional shell function so bloom runs peony tui.
   --shell bash|zsh           Choose which shell rc file to update when aliasing is enabled.
   -h, --help                 Show this help text.
 
-Release archives are expected to contain both binaries:
+Release archives are expected to contain one binary:
   peony
-  bloom
 EOF
 }
 
@@ -198,15 +197,8 @@ main() {
     echo "release archive did not contain a peony binary" >&2
     exit 1
   fi
-  if [[ ! -f "${extract_dir}/bloom" ]]; then
-    echo "release archive did not contain a bloom binary" >&2
-    exit 1
-  fi
-
   install_binary "${extract_dir}/peony" "peony"
-  install_binary "${extract_dir}/bloom" "bloom"
   echo "Installed: ${BIN_DIR}/peony"
-  echo "Installed: ${BIN_DIR}/bloom"
 
   if [[ "${ENABLE_ALIAS}" -eq 1 ]]; then
     if [[ -z "${TARGET_SHELL}" ]]; then

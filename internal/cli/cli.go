@@ -49,7 +49,7 @@ Examples:
   peony view 12
   peony view --archived
   peony tui
-  bloom
+  bloom  (if installed as an optional shell alias)
 
 For detailed help on a command:
   peony help <command>
@@ -887,19 +887,21 @@ Examples:
 `)
 
 	case "tui", "--tui":
-		fmt.Print(`peony tui — open the terminal garden
+		fmt.Print(`peony tui — open Bloom, the terminal garden
 
 Description:
-  Opens Peony's full-screen Bubble Tea interface for browsing, tending,
-  searching, filtering, and resolving thoughts.
+  Opens Bloom, Peony's full-screen Bubble Tea interface for browsing,
+  tending, searching, filtering, and resolving thoughts.
 
 Syntax:
   peony tui
+
+Optional shell alias:
   bloom
 
 Examples:
   peony tui
-  bloom
+  bloom  (if installed with install.sh --alias)
 
 `)
 
@@ -911,7 +913,7 @@ Examples:
 	return 0
 }
 
-// TUIRunner is the function used by RunPeony and RunBloom to start the terminal UI.
+// TUIRunner is the function used by RunPeony to start Bloom.
 // Tests may replace it to verify dispatch without starting an interactive program.
 var TUIRunner = tui.Run
 
@@ -927,8 +929,12 @@ func RunPeony(args []string) int {
 	cmd := args[0]
 	rest := args[1:]
 
-	// Print only when the eligible count changes.
-	shouldPrintNotice := cmd != "add" && cmd != "a" && cmd != "tend" && cmd != "t" && cmd != "tui" && cmd != "help" && cmd != "h" && cmd != "version" && cmd != "-v"
+	// Print only when the eligible count changes, and only for classic commands.
+	shouldPrintNotice := false
+	switch cmd {
+	case "view", "v", "release", "r", "evolve", "e", "configure", "config", "c":
+		shouldPrintNotice = true
+	}
 	if shouldPrintNotice {
 		st, closeDB, err := openStore()
 		if err == nil {
@@ -981,41 +987,4 @@ func RunPeony(args []string) int {
 		PrintHelp()
 		return 2
 	}
-}
-
-// PrintBloomHelp prints usage for the direct TUI binary.
-func PrintBloomHelp() {
-	fmt.Print(`Bloom: Peony's terminal garden
-
-Usage:
-  bloom
-  bloom help
-  bloom version
-
-Bloom opens the same TUI as:
-  peony tui
-`)
-}
-
-// RunBloom launches the TUI directly, with small help/version affordances.
-func RunBloom(args []string) int {
-	if len(args) == 0 {
-		_, _ = loadRuntimeConfig()
-		return TUIRunner()
-	}
-
-	if len(args) == 1 {
-		switch args[0] {
-		case "help", "-h", "--help":
-			PrintBloomHelp()
-			return 0
-		case "version", "-v", "--version":
-			fmt.Println("Peony " + Version)
-			return 0
-		}
-	}
-
-	fmt.Fprintln(os.Stderr, "bloom: this direct TUI binary does not accept arguments yet")
-	PrintBloomHelp()
-	return 2
 }

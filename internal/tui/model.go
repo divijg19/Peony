@@ -21,6 +21,8 @@ const (
 	modeAdd
 	modeSearch
 	modeTend
+	modeFilter
+	modeHelp
 	modeReleaseConfirm
 )
 
@@ -34,7 +36,7 @@ var stateFilters = []core.State{
 	core.StateArchived,
 }
 
-// Run opens Peony's terminal garden.
+// Run opens Bloom, Peony's terminal garden.
 func Run() int {
 	service, closeFn, err := app.OpenDefault()
 	if err != nil {
@@ -72,25 +74,29 @@ func NewModel(service *app.Service) Model {
 	m.tendNote.SetHeight(4)
 
 	m.search = textinput.New()
-	m.search.Placeholder = "search thoughts"
+	m.search.Placeholder = "search thoughts, states, notes, or ids"
 	m.search.CharLimit = 80
 	m.search.Width = 40
 
 	m.reloadPreserving(0)
+	m.ensureUsableSelection()
 	return m
 }
 
-// Model holds the state for the Peony TUI.
+// Model holds the state for Bloom.
 type Model struct {
 	service *app.Service
 
-	mode     mode
-	width    int
-	height   int
-	selected int
-	filter   core.State
-	query    string
-	status   string
+	mode        mode
+	width       int
+	height      int
+	zoneIndex   int
+	selected    int
+	filterIndex int
+	filter      core.State
+	query       string
+	status      string
+	detailFocus bool
 
 	snapshot app.GardenSnapshot
 
@@ -122,6 +128,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateSearch(msg)
 		case modeTend:
 			return m.updateTend(msg)
+		case modeFilter:
+			return m.updateFilter(msg)
+		case modeHelp:
+			return m.updateHelp(msg)
 		case modeReleaseConfirm:
 			return m.updateReleaseConfirm(msg)
 		default:
@@ -136,14 +146,43 @@ func (m Model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "q", "ctrl+c":
 		return m, tea.Quit
 	case "esc":
+		m.detailFocus = false
 		m.status = ""
+	case "?":
+		m.mode = modeHelp
+	case "tab":
+		if m.compactLayout() && m.hasSelection() {
+			m.detailFocus = !m.detailFocus
+			if m.detailFocus {
+				m.status = "Detail pane focused. Tab returns to the garden."
+			} else {
+				m.status = "Garden focused."
+			}
+		} else {
+			m.nextZone()
+		}
+	case "shift+tab":
+		m.previousZone()
 	case "down", "j":
-		m.move(1)
+		if !m.detailFocus {
+			m.move(1)
+		}
 	case "up", "k":
-		m.move(-1)
+		if !m.detailFocus {
+			m.move(-1)
+		}
+	case "right", "l":
+		m.nextZone()
+	case "left", "h":
+		m.previousZone()
+	case "enter":
+		if m.hasSelection() {
+			m.detailFocus = true
+			m.status = "Inspecting thought. Esc returns to the garden."
+		}
 	case "R":
 		m.reloadPreserving(m.selectedID())
-		m.status = "Garden refreshed."
+		m.status = "Bloom refreshed."
 	case "a":
 		m.mode = modeAdd
 		m.addBox.Reset()
@@ -155,8 +194,10 @@ func (m Model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.search.Focus()
 		m.status = "Search the garden. Enter applies."
 	case "f":
-		m.cycleFilter()
-	case "enter", "t":
+		m.mode = modeFilter
+		m.filterIndex = m.indexForFilter(m.filter)
+		m.status = "Choose a lifecycle filter."
+	case "t":
 		m.startTend()
 	case "r":
 		m.restSelected()
@@ -225,6 +266,40 @@ func (m Model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+func (m Model) updateFilter(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.mode = modeBrowse
+		m.status = "Filter unchanged."
+	case "up", "k":
+		m.filterIndex--
+		if m.filterIndex < 0 {
+			m.filterIndex = len(stateFilters) - 1
+		}
+	case "down", "j":
+		m.filterIndex = (m.filterIndex + 1) % len(stateFilters)
+	case "enter":
+		m.filter = stateFilters[m.filterIndex]
+		m.mode = modeBrowse
+		m.reloadPreserving(0)
+		if m.filter == "" {
+			m.status = "Showing the whole garden."
+		} else {
+			m.status = "Filtering: " + string(m.filter)
+		}
+	}
+	return m, nil
+}
+
+func (m Model) updateHelp(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "?", "q", "enter":
+		m.mode = modeBrowse
+		m.status = ""
+	}
+	return m, nil
+}
+
 func (m Model) updateTend(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
@@ -254,7 +329,7 @@ func (m Model) updateTend(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.mode = modeBrowse
 		m.reloadPreserving(item.Thought.ID)
-		m.status = "Marked tended. Use r, e, x, or A to resolve."
+		m.status = "Marked tended. Use r, e, x, or A when it feels resolved."
 		return m, nil
 	}
 
@@ -271,7 +346,6 @@ func (m Model) updateReleaseConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "y", "Y":
 		id := m.selectedID()
-		oldIndex := m.selected
 		if id == 0 {
 			m.mode = modeBrowse
 			return m, nil
@@ -283,13 +357,6 @@ func (m Model) updateReleaseConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.mode = modeBrowse
 		m.reloadPreserving(0)
-		if oldIndex >= len(m.snapshot.Thoughts) {
-			oldIndex = len(m.snapshot.Thoughts) - 1
-		}
-		if oldIndex < 0 {
-			oldIndex = 0
-		}
-		m.selected = oldIndex
 		m.status = fmt.Sprintf("Released #%d permanently.", id)
 	case "n", "N", "esc":
 		m.mode = modeBrowse
@@ -359,24 +426,6 @@ func (m *Model) archiveSelected() {
 	m.status = "Archived."
 }
 
-func (m *Model) cycleFilter() {
-	idx := 0
-	for i, state := range stateFilters {
-		if state == m.filter {
-			idx = i
-			break
-		}
-	}
-	idx = (idx + 1) % len(stateFilters)
-	m.filter = stateFilters[idx]
-	m.reloadPreserving(0)
-	if m.filter == "" {
-		m.status = "Showing all thoughts."
-	} else {
-		m.status = "Filtering: " + string(m.filter)
-	}
-}
-
 func (m *Model) reloadPreserving(id int64) {
 	if id == 0 {
 		id = m.selectedID()
@@ -387,28 +436,53 @@ func (m *Model) reloadPreserving(id int64) {
 		return
 	}
 	m.snapshot = snapshot
-	if len(m.snapshot.Thoughts) == 0 {
+	if len(m.snapshot.Zones) == 0 {
+		m.zoneIndex = 0
 		m.selected = 0
 		return
 	}
 	if id != 0 {
-		for i, item := range m.snapshot.Thoughts {
-			if item.Thought.ID == id {
-				m.selected = i
-				return
+		for zi, zone := range m.snapshot.Zones {
+			for ii, item := range zone.Thoughts {
+				if item.Thought.ID == id {
+					m.zoneIndex = zi
+					m.selected = ii
+					return
+				}
 			}
 		}
 	}
-	if m.selected >= len(m.snapshot.Thoughts) {
-		m.selected = len(m.snapshot.Thoughts) - 1
+	m.ensureUsableSelection()
+}
+
+func (m *Model) ensureUsableSelection() {
+	if len(m.snapshot.Zones) == 0 {
+		m.zoneIndex = 0
+		m.selected = 0
+		return
+	}
+	if m.zoneIndex < 0 {
+		m.zoneIndex = 0
+	}
+	if m.zoneIndex >= len(m.snapshot.Zones) {
+		m.zoneIndex = len(m.snapshot.Zones) - 1
+	}
+	zone := m.snapshot.Zones[m.zoneIndex]
+	if len(zone.Thoughts) == 0 {
+		m.selected = 0
+		return
 	}
 	if m.selected < 0 {
 		m.selected = 0
 	}
+	if m.selected >= len(zone.Thoughts) {
+		m.selected = len(zone.Thoughts) - 1
+	}
 }
 
 func (m *Model) move(delta int) {
-	if len(m.snapshot.Thoughts) == 0 {
+	zone := m.currentZone()
+	if len(zone.Thoughts) == 0 {
 		m.selected = 0
 		return
 	}
@@ -416,9 +490,37 @@ func (m *Model) move(delta int) {
 	if m.selected < 0 {
 		m.selected = 0
 	}
-	if m.selected >= len(m.snapshot.Thoughts) {
-		m.selected = len(m.snapshot.Thoughts) - 1
+	if m.selected >= len(zone.Thoughts) {
+		m.selected = len(zone.Thoughts) - 1
 	}
+}
+
+func (m *Model) nextZone() {
+	if len(m.snapshot.Zones) == 0 {
+		return
+	}
+	m.zoneIndex = (m.zoneIndex + 1) % len(m.snapshot.Zones)
+	m.selected = 0
+	m.detailFocus = false
+}
+
+func (m *Model) previousZone() {
+	if len(m.snapshot.Zones) == 0 {
+		return
+	}
+	m.zoneIndex--
+	if m.zoneIndex < 0 {
+		m.zoneIndex = len(m.snapshot.Zones) - 1
+	}
+	m.selected = 0
+	m.detailFocus = false
+}
+
+func (m Model) currentZone() app.GardenZone {
+	if len(m.snapshot.Zones) == 0 || m.zoneIndex < 0 || m.zoneIndex >= len(m.snapshot.Zones) {
+		return app.GardenZone{Title: "Garden", Empty: "Nothing is here yet."}
+	}
+	return m.snapshot.Zones[m.zoneIndex]
 }
 
 func (m Model) View() string {
@@ -433,6 +535,10 @@ func (m Model) View() string {
 		return m.shell("Search", m.search.View()+"\n\n"+hintStyle.Render("Enter apply  Ctrl+U clear  Esc cancel"))
 	case modeTend:
 		return m.shell("Tend", m.tendView())
+	case modeFilter:
+		return m.shell("Filter", m.filterView())
+	case modeHelp:
+		return m.shell("Help", m.helpView())
 	case modeReleaseConfirm:
 		return m.shell("Release", m.releaseView())
 	default:
@@ -441,16 +547,22 @@ func (m Model) View() string {
 }
 
 func (m Model) browseView() string {
-	list := m.listView()
+	zones := m.zonesView()
 	detail := m.detailView()
-	if m.width >= 100 {
-		leftWidth := maxInt(38, m.width/2-2)
-		rightWidth := maxInt(40, m.width-leftWidth-4)
-		list = lipgloss.NewStyle().Width(leftWidth).Render(list)
-		detail = lipgloss.NewStyle().Width(rightWidth).Render(detail)
-		return m.shell("Garden Inbox", lipgloss.JoinHorizontal(lipgloss.Top, list, "  ", detail))
+	if m.compactLayout() {
+		if m.detailFocus {
+			return m.shell("Garden", detail+"\n\n"+hintStyle.Render("Tab returns to zones  Esc back"))
+		}
+		return m.shell("Garden", zones+"\n\n"+hintStyle.Render("Tab switches pane  h/l switches zones"))
 	}
-	return m.shell("Garden Inbox", list+"\n\n"+detail)
+	if m.width >= 110 {
+		leftWidth := maxInt(44, m.width/2-4)
+		rightWidth := maxInt(44, m.width-leftWidth-4)
+		zones = lipgloss.NewStyle().Width(leftWidth).Render(zones)
+		detail = lipgloss.NewStyle().Width(rightWidth).Render(detail)
+		return m.shell("Garden", lipgloss.JoinHorizontal(lipgloss.Top, zones, "  ", detail))
+	}
+	return m.shell("Garden", zones+"\n\n"+detail)
 }
 
 func (m Model) shell(title string, body string) string {
@@ -462,9 +574,10 @@ func (m Model) shell(title string, body string) string {
 	if query == "" {
 		query = "none"
 	}
-	header := titleStyle.Render("Peony") + " " + subtleStyle.Render(title)
-	meta := fmt.Sprintf("ready %d | filter %s | search %s", m.snapshot.ReadyCount, filter, query)
-	footer := hintStyle.Render("j/k move  a add  t tend  r rest  e evolve  x release  A archive  / search  f filter  R reload  q quit")
+	zone := m.currentZone().Title
+	header := titleStyle.Render("Bloom") + " " + subtleStyle.Render(title)
+	meta := fmt.Sprintf("ready %d | zone %s | filter %s | search %s", m.snapshot.ReadyCount, strings.ToLower(zone), filter, query)
+	footer := hintStyle.Render("j/k move  tab zone/pane  a capture  t tend  r rest  e evolve  x release  A archive  / search  f filter  ? help  R reload  q quit")
 	if strings.TrimSpace(m.status) != "" {
 		footer += "\n" + statusStyle.Render(m.status)
 	}
@@ -479,32 +592,46 @@ func (m Model) shell(title string, body string) string {
 	)
 }
 
-func (m Model) listView() string {
-	if len(m.snapshot.Thoughts) == 0 {
-		return panelStyle.Render("No thoughts here yet.")
+func (m Model) zonesView() string {
+	if len(m.snapshot.Zones) == 0 {
+		return panelStyle.Render("Nothing has been planted yet.")
 	}
-
-	var b strings.Builder
-	for i, item := range m.snapshot.Thoughts {
-		marker := " "
-		if i == m.selected {
-			marker = ">"
-		}
-		state := string(item.Thought.CurrentState)
-		if item.Ready {
-			state = "ready"
-		}
-		line := fmt.Sprintf("%s #%d %-8s %s", marker, item.Thought.ID, state, oneLine(item.Thought.Content, 58))
-		if i == m.selected {
-			b.WriteString(selectedStyle.Render(line))
+	blocks := make([]string, 0, len(m.snapshot.Zones))
+	for zi, zone := range m.snapshot.Zones {
+		var b strings.Builder
+		title := fmt.Sprintf("%s (%d)", zone.Title, len(zone.Thoughts))
+		if zi == m.zoneIndex {
+			b.WriteString(activeZoneStyle.Render(title))
 		} else {
-			b.WriteString(line)
+			b.WriteString(zoneStyle.Render(title))
 		}
-		if i < len(m.snapshot.Thoughts)-1 {
-			b.WriteString("\n")
+		b.WriteString("\n")
+		if len(zone.Thoughts) == 0 {
+			b.WriteString(subtleStyle.Render(zone.Empty))
+		} else {
+			for ii, item := range zone.Thoughts {
+				marker := " "
+				if zi == m.zoneIndex && ii == m.selected && !m.detailFocus {
+					marker = ">"
+				}
+				state := string(item.Thought.CurrentState)
+				if item.Ready {
+					state = "ready"
+				}
+				line := fmt.Sprintf("%s #%d %-8s %s", marker, item.Thought.ID, state, oneLine(item.Thought.Content, 56))
+				if zi == m.zoneIndex && ii == m.selected && !m.detailFocus {
+					b.WriteString(selectedStyle.Render(line))
+				} else {
+					b.WriteString(line)
+				}
+				if ii < len(zone.Thoughts)-1 {
+					b.WriteString("\n")
+				}
+			}
 		}
+		blocks = append(blocks, panelStyle.Render(b.String()))
 	}
-	return panelStyle.Render(b.String())
+	return strings.Join(blocks, "\n")
 }
 
 func (m Model) detailView() string {
@@ -519,6 +646,8 @@ func (m Model) detailView() string {
 	fmt.Fprintf(&b, "#%d  %s  tends:%d\n", t.ID, t.CurrentState, t.TendCounter)
 	if item.Ready {
 		b.WriteString("Ready to tend\n")
+	} else if t.CurrentState == core.StateTended {
+		b.WriteString("Needs a resolution: rest, evolve, archive, or release\n")
 	} else {
 		fmt.Fprintf(&b, "Eligible %s\n", relativeTime(t.EligibilityAt, now))
 	}
@@ -527,6 +656,9 @@ func (m Model) detailView() string {
 	b.WriteString("\n\n")
 	fmt.Fprintf(&b, "Created  %s\n", t.CreatedAt.UTC().Format("2006-01-02 15:04Z"))
 	fmt.Fprintf(&b, "Updated  %s\n", t.UpdatedAt.UTC().Format("2006-01-02 15:04Z"))
+	if t.LastTendedAt != nil {
+		fmt.Fprintf(&b, "Tended   %s\n", t.LastTendedAt.UTC().Format("2006-01-02 15:04Z"))
+	}
 	if len(item.Events) > 0 {
 		b.WriteString("\nEvents\n")
 		for _, event := range item.Events {
@@ -553,6 +685,41 @@ func (m Model) tendView() string {
 	}, "\n")
 }
 
+func (m Model) filterView() string {
+	labels := []string{"All", "Captured", "Resting", "Tended", "Evolved", "Released", "Archived"}
+	var b strings.Builder
+	for i, label := range labels {
+		marker := " "
+		if i == m.filterIndex {
+			marker = ">"
+		}
+		line := marker + " " + label
+		if i == m.filterIndex {
+			b.WriteString(selectedStyle.Render(line))
+		} else {
+			b.WriteString(line)
+		}
+		if i < len(labels)-1 {
+			b.WriteString("\n")
+		}
+	}
+	return panelStyle.Render(b.String()) + "\n" + hintStyle.Render("j/k choose  Enter apply  Esc cancel")
+}
+
+func (m Model) helpView() string {
+	return panelStyle.Render(strings.Join([]string{
+		"Bloom is Peony's terminal garden.",
+		"",
+		"Move: j/k, arrows, h/l, Tab",
+		"Capture: a",
+		"Tend: t, then Ctrl+S",
+		"Resolve: r rest, e evolve, A archive, x release",
+		"Find: / search, f filter",
+		"Refresh: R",
+		"Leave: q from garden, Esc from overlays",
+	}, "\n"))
+}
+
 func (m Model) releaseView() string {
 	item, ok := m.selectedItem()
 	if !ok {
@@ -566,14 +733,16 @@ func (m Model) releaseView() string {
 }
 
 func (m Model) selectedItem() (app.GardenThought, bool) {
-	if !m.hasSelection() {
+	zone := m.currentZone()
+	if m.selected < 0 || m.selected >= len(zone.Thoughts) {
 		return app.GardenThought{}, false
 	}
-	return m.snapshot.Thoughts[m.selected], true
+	return zone.Thoughts[m.selected], true
 }
 
 func (m Model) hasSelection() bool {
-	return m.selected >= 0 && m.selected < len(m.snapshot.Thoughts)
+	_, ok := m.selectedItem()
+	return ok
 }
 
 func (m Model) selectedID() int64 {
@@ -582,6 +751,19 @@ func (m Model) selectedID() int64 {
 		return 0
 	}
 	return item.Thought.ID
+}
+
+func (m Model) compactLayout() bool {
+	return m.width > 0 && m.width < 82
+}
+
+func (m Model) indexForFilter(filter core.State) int {
+	for i, state := range stateFilters {
+		if state == filter {
+			return i
+		}
+	}
+	return 0
 }
 
 func (m *Model) focusTendInput() {
@@ -613,10 +795,10 @@ func oneLine(s string, limit int) string {
 	if limit <= 0 || len(s) <= limit {
 		return s
 	}
-	if limit <= 1 {
+	if limit <= 3 {
 		return s[:limit]
 	}
-	return s[:limit-1] + "..."
+	return s[:limit-3] + "..."
 }
 
 func relativeTime(t time.Time, now time.Time) string {
@@ -661,14 +843,16 @@ func maxInt(a, b int) int {
 }
 
 var (
-	titleStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("170"))
-	subtleStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-	hintStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("246"))
-	statusStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("114"))
-	selectedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("230")).Background(lipgloss.Color("95"))
-	labelStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("109"))
-	panelStyle    = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("238")).Padding(1, 2)
-	smallStyle    = lipgloss.NewStyle().Padding(1, 2)
+	titleStyle      = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("170"))
+	subtleStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
+	hintStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("246"))
+	statusStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("114"))
+	selectedStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("230")).Background(lipgloss.Color("95"))
+	labelStyle      = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("109"))
+	zoneStyle       = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("109"))
+	activeZoneStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("230")).Background(lipgloss.Color("95")).Padding(0, 1)
+	panelStyle      = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("238")).Padding(1, 2)
+	smallStyle      = lipgloss.NewStyle().Padding(1, 2)
 )
 
 var _ tea.Model = Model{}
