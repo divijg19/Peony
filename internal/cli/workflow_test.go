@@ -26,11 +26,19 @@ func TestReleaseWorkflowBuildsSinglePeonyBinaryAssets(t *testing.T) {
 	}
 	source := string(data)
 	for _, want := range []string{
-		"peony_${tag}_${goos}_${goarch}",
-		"go build -trimpath",
+		"RELEASE_TAG:",
+		"inputs.tag",
+		"peony_${RELEASE_TAG}_${goos}_${goarch}",
+		"go vet ./...",
+		"go test ./...",
+		"go build \\",
+		"-trimpath",
 		"./cmd/peony",
-		"softprops/action-gh-release@v3",
+		"tar --sort=name",
 		"checksums.txt",
+		"manifest.txt",
+		"fail_on_unmatched_files: true",
+		"softprops/action-gh-release@v3",
 	} {
 		if !strings.Contains(source, want) {
 			t.Fatalf("release workflow missing %q", want)
@@ -54,7 +62,8 @@ func TestCIWorkflowChecksFormattingTestsVetAndBuild(t *testing.T) {
 		"gofmt -l .",
 		"go vet ./...",
 		"go test ./...",
-		"go build -o /tmp/peony ./cmd/peony",
+		"go build -trimpath -o /tmp/peony ./cmd/peony",
+		"bash install.sh --help",
 	} {
 		if !strings.Contains(source, want) {
 			t.Fatalf("ci workflow missing %q", want)

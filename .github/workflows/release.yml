@@ -4,17 +4,43 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag to publish, for example v0.6.0"
+        required: true
+        type: string
+      prerelease:
+        description: "Mark the GitHub release as a prerelease"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write
+
+concurrency:
+  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
 
 jobs:
   release:
     name: Build and publish release
     runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+      PRERELEASE: ${{ github.event_name == 'workflow_dispatch' && inputs.prerelease || false }}
     steps:
-      - name: Checkout
+      - name: Checkout release ref
         uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+          fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -22,26 +48,103 @@ jobs:
           go-version-file: go.mod
           cache-dependency-path: go.sum
 
+      - name: Validate release tag
+        run: |
+          set -euo pipefail
+          if [[ ! "${RELEASE_TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Release tag must look like v1.2.3 or v1.2.3-rc.1; got '${RELEASE_TAG}'" >&2
+            exit 1
+          fi
+          git rev-parse -q --verify "refs/tags/${RELEASE_TAG}" >/dev/null
+
+      - name: Preflight checks
+        run: |
+          set -euo pipefail
+          files="$(gofmt -l .)"
+          if [[ -n "${files}" ]]; then
+            echo "The following files need gofmt:"
+            echo "${files}"
+            exit 1
+          fi
+          go vet ./...
+          go test ./...
+
       - name: Build release assets
         run: |
           set -euo pipefail
-          tag="${GITHUB_REF_NAME}"
+          commit="$(git rev-parse HEAD)"
+          source_date_epoch="$(git log -1 --format=%ct)"
           targets="linux/amd64 linux/arm64 darwin/amd64 darwin/arm64"
           mkdir -p dist
+
           for target in ${targets}; do
             goos="${target%/*}"
             goarch="${target#*/}"
-            asset="peony_${tag}_${goos}_${goarch}"
-            mkdir -p "dist/${asset}"
-            GOOS="${goos}" GOARCH="${goarch}" CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o "dist/${asset}/peony" ./cmd/peony
-            tar -C "dist/${asset}" -czf "dist/${asset}.tar.gz" peony
+            asset="peony_${RELEASE_TAG}_${goos}_${goarch}"
+            outdir="dist/${asset}"
+            mkdir -p "${outdir}"
+
+            echo "Building ${asset}"
+            GOOS="${goos}" GOARCH="${goarch}" CGO_ENABLED=0 go build \
+              -trimpath \
+              -ldflags "-s -w" \
+              -o "${outdir}/peony" \
+              ./cmd/peony
+
+            chmod 0755 "${outdir}/peony"
+            cat > "${outdir}/README.txt" <<EOF
+            Peony ${RELEASE_TAG}
+            Commit: ${commit}
+            Platform: ${goos}/${goarch}
+
+            Install:
+              install -m 0755 peony ~/.local/bin/peony
+
+            Bloom opens with:
+              peony tui
+            EOF
+
+            tar --sort=name \
+              --mtime="@${source_date_epoch}" \
+              --owner=0 --group=0 --numeric-owner \
+              -C "${outdir}" \
+              -czf "dist/${asset}.tar.gz" \
+              peony README.txt
           done
+
+      - name: Verify packaged assets
+        run: |
+          set -euo pipefail
           cd dist
-          sha256sum *.tar.gz > checksums.txt
+          expected=(
+            "peony_${RELEASE_TAG}_linux_amd64.tar.gz"
+            "peony_${RELEASE_TAG}_linux_arm64.tar.gz"
+            "peony_${RELEASE_TAG}_darwin_amd64.tar.gz"
+            "peony_${RELEASE_TAG}_darwin_arm64.tar.gz"
+          )
+          for archive in "${expected[@]}"; do
+            test -s "${archive}"
+            tar -tzf "${archive}" | sort | diff -u <(printf 'README.txt\npeony\n') -
+          done
+          sha256sum "${expected[@]}" > checksums.txt
+          {
+            echo "Peony ${RELEASE_TAG}"
+            echo
+            echo "Assets:"
+            printf -- '- %s\n' "${expected[@]}"
+            echo "- checksums.txt"
+          } > "peony_${RELEASE_TAG}_manifest.txt"
 
       - name: Publish release
         uses: softprops/action-gh-release@v3
         with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: Peony ${{ env.RELEASE_TAG }}
+          generate_release_notes: true
+          make_latest: ${{ env.PRERELEASE != 'true' }}
+          prerelease: ${{ env.PRERELEASE == 'true' }}
+          fail_on_unmatched_files: true
           files: |
             dist/*.tar.gz
             dist/checksums.txt
+            dist/peony_${{ env.RELEASE_TAG }}_manifest.txt

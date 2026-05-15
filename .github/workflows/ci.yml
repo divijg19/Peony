@@ -4,10 +4,22 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
 jobs:
   test:
-    name: Test
+    name: Format, test, vet, and build
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -21,8 +33,9 @@ jobs:
       - name: Check formatting
         run: |
           files="$(gofmt -l .)"
-          if [ -n "$files" ]; then
-            echo "$files"
+          if [[ -n "${files}" ]]; then
+            echo "The following files need gofmt:"
+            echo "${files}"
             exit 1
           fi
 
@@ -33,4 +46,10 @@ jobs:
         run: go test ./...
 
       - name: Build peony
-        run: go build -o /tmp/peony ./cmd/peony
+        run: go build -trimpath -o /tmp/peony ./cmd/peony
+
+      - name: Smoke test CLI help
+        run: |
+          /tmp/peony version
+          /tmp/peony help tui
+          bash install.sh --help
