@@ -16,15 +16,6 @@ To also add an optional `bloom` shell function that opens Bloom (`peony tui`):
 curl -fsSL https://raw.githubusercontent.com/divijg19/peony/main/install.sh | bash -s -- --alias --shell bash
 ```
 
-Release archives install one binary:
-
-* `peony` — the CLI and Bloom TUI entrypoint
-
-```bash
-peony tui
-bloom  # only if installed with --alias
-```
-
 ---
 
 ## What is `Peony`?
@@ -162,20 +153,20 @@ Commands are designed to feel **inviting**, not mechanical.
 
 ## TUI: Bloom
 
-`Bloom` is Peony's keyboard-first terminal garden. It is part of the single `peony` application and opens with:
+`Bloom` is Peony's keyboard-first terminal garden-inspired interface.
 
 ```bash
 peony tui
 bloom  # only if installed with --alias
 ```
 
-Bloom opens to a calm Garden with three zones: Ready, Resting, and Memory. It keeps a detail pane close by for content, state, readiness, timestamps, and event history. From there you can capture, tend, rest, evolve, archive, search, filter, reload, and permanently release thoughts without leaving the terminal.
+Bloom opens to a calm TUI with three zones: Ready, Resting, and Memory. It keeps a detail pane close by for content, state, readiness, timestamps, and event history. From there you can capture, tend, rest, evolve, archive, search, filter, reload, and permanently release thoughts without leaving the terminal.
 
 ---
 
-## Frontend: A Quiet Window
+## WebUI: A Quiet Window
 
-`Peony` includes an **optional, read-only frontend**—a window into your inner landscape.
+`Peony` includes an **optional, read-only WebUI frontend**- a window into your inner landscape.
 
 ### Purpose
 
@@ -191,7 +182,7 @@ Bloom opens to a calm Garden with three zones: Ready, Resting, and Memory. It ke
 * Slow transitions
 * Soft color palette
 
-The frontend exists to **help you see**, not manage.
+The WebUI exists to **help you see**, not manage.
 
 ---
 
@@ -206,13 +197,13 @@ Peony
 │
 ├── CLI Interface
 │
-├── TUI Interface
+├── TUI
 │   └── Bubble Tea + Lip Gloss
 │
 ├── Storage
 │   └── SQLite (local-first)
 │
-└── Read-only Frontend
+└── Read-only WebUI
     ├── GoTH + HTMX
     └── Tailwind (minimal, soft)
 ```
@@ -231,12 +222,10 @@ Peony
 * **Bubble Tea** — calm, state-driven terminal UX
 * **Lip Gloss** — intentional visual hierarchy
 
-### Frontend (optional)
+### WebUI
 
 * **GoTH + HTMX** — minimal, server-driven UI
 * **Tailwind CSS** — restrained visual language
-
-> No JavaScript framework is required for `Peony`’s core philosophy.
 
 ---
 
@@ -272,7 +261,7 @@ It is especially suited for:
 
 ## Project Status
 
-`Peony` is **pre-frontend, CLI-complete**.
+`Peony` is **pre-WebUI, CLI and TUI complete**.
 The focus is on:
 
 * core lifecycle correctness
@@ -290,10 +279,10 @@ Feature creep is intentionally resisted.
 * [x] v0.3 - Database re-design for temporal context, tend notifications, tend visual and terminal editor implementation, config settings for tend time and editor choice, evolve
 * [x] v0.4 - Archive, Release, solidified tend notification consistency
 * [x] v0.5 - CLI polish, user feedback iteration
-* [ ] v0.6 - TUI frontend
-~
-* [ ] v0.7 - Read-only WebUI frontend (Eden integration)
-* [ ] v0.8 - Frontend polish and interactivity, user feedback iteration
+* [x] v0.6 - TUI frontend initialization
+* [x] v0.7 - TUI Polish, CI and Docs
+* [ ] v0.8 - Read-only WebUI frontend (Eden integration)
+* [ ] v0.9 - Overall polish, interactivity and user feedback iteration
 * [ ] v1.0+ - Optional Semantic AI integration (non-prescriptive, reflective only)
 
 AI integration, if ever added, will be:
