@@ -60,7 +60,7 @@ func TestRunPeonyHelpTUI(t *testing.T) {
 	}
 }
 
-func TestRunBloomLaunchesRunnerDirectly(t *testing.T) {
+func TestRunPeonyBloomIsNotACommand(t *testing.T) {
 	previous := TUIRunner
 	defer func() {
 		TUIRunner = previous
@@ -72,38 +72,12 @@ func TestRunBloomLaunchesRunnerDirectly(t *testing.T) {
 		return 0
 	}
 
-	if code := RunBloom(nil); code != 0 {
-		t.Fatalf("exit code = %d, want 0", code)
-	}
-	if called != 1 {
-		t.Fatalf("runner calls = %d, want 1", called)
-	}
-}
-
-func TestRunBloomHelpAndVersion(t *testing.T) {
-	helpOutput := captureStdout(t, func() {
-		if code := RunBloom([]string{"help"}); code != 0 {
-			t.Fatalf("help exit code = %d, want 0", code)
-		}
-	})
-	if !strings.Contains(helpOutput, "Bloom") || !strings.Contains(helpOutput, "peony tui") {
-		t.Fatalf("unexpected help output: %q", helpOutput)
-	}
-
-	versionOutput := captureStdout(t, func() {
-		if code := RunBloom([]string{"--version"}); code != 0 {
-			t.Fatalf("version exit code = %d, want 0", code)
-		}
-	})
-	if !strings.Contains(versionOutput, "Peony "+Version) {
-		t.Fatalf("unexpected version output: %q", versionOutput)
-	}
-}
-
-func TestRunBloomUnknownArgsReturnUsageError(t *testing.T) {
-	code := RunBloom([]string{"add", "not-from-bloom"})
+	code := RunPeony([]string{"bloom"})
 	if code != 2 {
 		t.Fatalf("exit code = %d, want 2", code)
+	}
+	if called != 0 {
+		t.Fatalf("runner calls = %d, want 0", called)
 	}
 }
 

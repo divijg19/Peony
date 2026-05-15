@@ -1,0 +1,47 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Build release assets
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          targets="linux/amd64 linux/arm64 darwin/amd64 darwin/arm64"
+          mkdir -p dist
+          for target in ${targets}; do
+            goos="${target%/*}"
+            goarch="${target#*/}"
+            asset="peony_${tag}_${goos}_${goarch}"
+            mkdir -p "dist/${asset}"
+            GOOS="${goos}" GOARCH="${goarch}" CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o "dist/${asset}/peony" ./cmd/peony
+            tar -C "dist/${asset}" -czf "dist/${asset}.tar.gz" peony
+          done
+          cd dist
+          sha256sum *.tar.gz > checksums.txt
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: |
+            dist/*.tar.gz
+            dist/checksums.txt

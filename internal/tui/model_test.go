@@ -2,6 +2,7 @@ package tui
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -93,15 +94,23 @@ func TestModelTendThenRest(t *testing.T) {
 	if m.mode != modeBrowse {
 		t.Fatalf("mode after tend = %v, want browse", m.mode)
 	}
-	if got := m.snapshot.Thoughts[m.selected].Thought.CurrentState; got != core.StateTended {
+	item, ok := m.selectedItem()
+	if !ok {
+		t.Fatal("expected selected tended thought")
+	}
+	if got := item.Thought.CurrentState; got != core.StateTended {
 		t.Fatalf("state after tend = %s, want tended", got)
 	}
 
 	m = press(m, runeKey('r'))
-	if got := m.snapshot.Thoughts[m.selected].Thought.CurrentState; got != core.StateResting {
+	item, ok = m.selectedItem()
+	if !ok {
+		t.Fatal("expected selected rested thought")
+	}
+	if got := item.Thought.CurrentState; got != core.StateResting {
 		t.Fatalf("state after rest = %s, want resting", got)
 	}
-	if !m.snapshot.Thoughts[m.selected].Thought.EligibilityAt.After(time.Now().UTC().Add(-time.Second)) {
+	if !item.Thought.EligibilityAt.After(time.Now().UTC().Add(-time.Second)) {
 		t.Fatal("rest should refresh eligibility time")
 	}
 }
@@ -121,9 +130,9 @@ func TestModelFilteringSearchAndNavigation(t *testing.T) {
 	}
 	m.reloadPreserving(0)
 
-	m = press(m, tea.KeyMsg{Type: tea.KeyDown})
-	if m.selected != 1 {
-		t.Fatalf("selected = %d, want 1", m.selected)
+	m = press(m, tea.KeyMsg{Type: tea.KeyRight})
+	if m.zoneIndex != 1 {
+		t.Fatalf("zone index = %d, want resting zone", m.zoneIndex)
 	}
 
 	m = press(m, runeKey('/'))
@@ -134,6 +143,8 @@ func TestModelFilteringSearchAndNavigation(t *testing.T) {
 	}
 
 	m = press(m, runeKey('f'))
+	m = press(m, tea.KeyMsg{Type: tea.KeyDown})
+	m = press(m, tea.KeyMsg{Type: tea.KeyEnter})
 	if m.filter != core.StateCaptured {
 		t.Fatalf("filter = %q, want captured", m.filter)
 	}
@@ -156,13 +167,21 @@ func TestModelEvolveArchiveAndReleaseCancel(t *testing.T) {
 	m.reloadPreserving(firstID)
 
 	m = press(m, runeKey('e'))
-	if got := m.snapshot.Thoughts[m.selected].Thought.CurrentState; got != core.StateEvolved {
+	item, ok := m.selectedItem()
+	if !ok {
+		t.Fatal("expected selected evolved thought")
+	}
+	if got := item.Thought.CurrentState; got != core.StateEvolved {
 		t.Fatalf("state after evolve = %s, want evolved", got)
 	}
 
 	m.reloadPreserving(secondID)
 	m = press(m, runeKey('A'))
-	if got := m.snapshot.Thoughts[m.selected].Thought.CurrentState; got != core.StateArchived {
+	item, ok = m.selectedItem()
+	if !ok {
+		t.Fatal("expected selected archived thought")
+	}
+	if got := item.Thought.CurrentState; got != core.StateArchived {
 		t.Fatalf("state after archive = %s, want archived", got)
 	}
 
@@ -176,6 +195,53 @@ func TestModelEvolveArchiveAndReleaseCancel(t *testing.T) {
 	}
 	if len(m.snapshot.Thoughts) != 2 {
 		t.Fatalf("thought count after cancel = %d, want 2", len(m.snapshot.Thoughts))
+	}
+}
+
+func TestModelZoneNavigationHelpFilterAndCompactRendering(t *testing.T) {
+	withReadyThoughts(t)
+	m := newTestModel(t)
+	if _, err := m.service.Capture("alpha"); err != nil {
+		t.Fatalf("capture alpha: %v", err)
+	}
+	m.reloadPreserving(0)
+
+	if len(m.snapshot.Zones) != 3 {
+		t.Fatalf("zone count = %d, want 3", len(m.snapshot.Zones))
+	}
+	m = press(m, tea.KeyMsg{Type: tea.KeyRight})
+	if m.zoneIndex != 1 {
+		t.Fatalf("zone index after right = %d, want 1", m.zoneIndex)
+	}
+	m = press(m, tea.KeyMsg{Type: tea.KeyLeft})
+	if m.zoneIndex != 0 {
+		t.Fatalf("zone index after left = %d, want 0", m.zoneIndex)
+	}
+
+	m = press(m, runeKey('?'))
+	if m.mode != modeHelp {
+		t.Fatalf("mode = %v, want help", m.mode)
+	}
+	if view := m.View(); !strings.Contains(view, "Bloom is Peony's terminal garden") {
+		t.Fatalf("help view missing Bloom copy: %q", view)
+	}
+	m = press(m, tea.KeyMsg{Type: tea.KeyEsc})
+
+	m = press(m, runeKey('f'))
+	if m.mode != modeFilter {
+		t.Fatalf("mode = %v, want filter", m.mode)
+	}
+	m = press(m, tea.KeyMsg{Type: tea.KeyDown})
+	m = press(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.filter != core.StateCaptured {
+		t.Fatalf("filter = %q, want captured", m.filter)
+	}
+
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 70, Height: 24})
+	m = next.(Model)
+	m = press(m, tea.KeyMsg{Type: tea.KeyTab})
+	if !m.detailFocus {
+		t.Fatal("tab in compact layout should focus detail pane")
 	}
 }
 

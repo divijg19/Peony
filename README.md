@@ -4,28 +4,25 @@
 
 > *Not a task manager, notes app or journal.*
 
----
-
-Quick install (release binaries):
+Quick install (release binary):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/divijg19/peony/main/install.sh | bash
 ```
 
-Release archives install both:
-
-* `peony` — the primary CLI
-* `bloom` — the standalone TUI entrypoint, equivalent to `peony tui`
-
-To also add an optional shell function for `bloom` during install:
+To also add an optional `bloom` shell function that opens Bloom (`peony tui`):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/divijg19/peony/main/install.sh | bash -s -- --alias --shell bash
 ```
 
+Release archives install one binary:
+
+* `peony` — the CLI and Bloom TUI entrypoint
+
 ```bash
 peony tui
-bloom
+bloom  # only if installed with --alias
 ```
 
 ---
@@ -154,25 +151,25 @@ Commands are designed to feel **inviting**, not mechanical.
 
 ## CLI Commands
 
-* `add` — capture a thought gently
-* `tend` — surface thoughts ready for reflection
-* `view` — read a thought in context
-* `rest` — intentionally defer
-* `evolve` — convert into a task / note (external)
-* `release` — let go without guilt
-* `archive` — long-term memory
-* `tui` — open the full-screen terminal garden
+* `add` - capture a thought gently
+* `tend` - surface thoughts ready for reflection
+* `view` - read a thought in context
+* `rest` - intentionally defer
+* `evolve` - convert into a task / note (external)
+* `release` - let go without guilt
+* `archive` - long-term memory
+* `tui` - open the full-screen terminal garden
 
 ## TUI: Bloom
 
-`Bloom` is Peony's keyboard-first terminal garden.
+`Bloom` is Peony's keyboard-first terminal garden. It is part of the single `peony` application and opens with:
 
 ```bash
 peony tui
-bloom
+bloom  # only if installed with --alias
 ```
 
-It opens to a Garden Inbox with thoughts ready to tend, recent resting thoughts, and a detail pane for context and event history. From there you can capture, tend, rest, evolve, archive, search, filter, reload, and permanently release thoughts without leaving the terminal.
+Bloom opens to a calm Garden with three zones: Ready, Resting, and Memory. It keeps a detail pane close by for content, state, readiness, timestamps, and event history. From there you can capture, tend, rest, evolve, archive, search, filter, reload, and permanently release thoughts without leaving the terminal.
 
 ---
 

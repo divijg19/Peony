@@ -67,6 +67,28 @@ func TestCaptureSnapshotAndSearch(t *testing.T) {
 	}
 }
 
+func TestBuildZonesGroupsThoughtsByBloomMeaning(t *testing.T) {
+	zones := buildZones([]GardenThought{
+		{Thought: core.Thought{ID: 1, CurrentState: core.StateCaptured}, Ready: true},
+		{Thought: core.Thought{ID: 2, CurrentState: core.StateResting}},
+		{Thought: core.Thought{ID: 3, CurrentState: core.StateEvolved}},
+		{Thought: core.Thought{ID: 4, CurrentState: core.StateTended}},
+	})
+
+	if len(zones) != 3 {
+		t.Fatalf("zone count = %d, want 3", len(zones))
+	}
+	if zones[0].Kind != ZoneReady || len(zones[0].Thoughts) != 2 {
+		t.Fatalf("ready zone = %s/%d, want ready/2", zones[0].Kind, len(zones[0].Thoughts))
+	}
+	if zones[1].Kind != ZoneResting || len(zones[1].Thoughts) != 1 {
+		t.Fatalf("resting zone = %s/%d, want resting/1", zones[1].Kind, len(zones[1].Thoughts))
+	}
+	if zones[2].Kind != ZoneMemory || len(zones[2].Thoughts) != 1 {
+		t.Fatalf("memory zone = %s/%d, want memory/1", zones[2].Kind, len(zones[2].Thoughts))
+	}
+}
+
 func TestTendRestEvolveArchiveAndRelease(t *testing.T) {
 	withSettleDuration(t, 0)
 	service := newTestService(t)

@@ -62,9 +62,27 @@ type GardenThought struct {
 	Ready   bool
 }
 
+// ZoneKind identifies one of Bloom's high-level garden zones.
+type ZoneKind string
+
+const (
+	ZoneReady   ZoneKind = "ready"
+	ZoneResting ZoneKind = "resting"
+	ZoneMemory  ZoneKind = "memory"
+)
+
+// GardenZone groups thoughts by the way they should feel in Bloom.
+type GardenZone struct {
+	Kind     ZoneKind
+	Title    string
+	Empty    string
+	Thoughts []GardenThought
+}
+
 // GardenSnapshot is the current browse state for the terminal garden.
 type GardenSnapshot struct {
 	Thoughts   []GardenThought
+	Zones      []GardenZone
 	ReadyCount int
 	Filter     core.State
 	Query      string
@@ -142,12 +160,36 @@ func (s *Service) Snapshot(filter core.State, query string) (GardenSnapshot, err
 		return left.Thought.ID < right.Thought.ID
 	})
 
+	zones := buildZones(thoughts)
+
 	return GardenSnapshot{
 		Thoughts:   thoughts,
+		Zones:      zones,
 		ReadyCount: readyCount,
 		Filter:     filter,
 		Query:      query,
 	}, nil
+}
+
+func buildZones(thoughts []GardenThought) []GardenZone {
+	zones := []GardenZone{
+		{Kind: ZoneReady, Title: "Ready", Empty: "Nothing needs you right now."},
+		{Kind: ZoneResting, Title: "Resting", Empty: "Your thoughts are settling."},
+		{Kind: ZoneMemory, Title: "Memory", Empty: "Nothing has been placed in memory yet."},
+	}
+
+	for _, item := range thoughts {
+		switch {
+		case item.Ready || item.Thought.CurrentState == core.StateTended:
+			zones[0].Thoughts = append(zones[0].Thoughts, item)
+		case item.Thought.CurrentState == core.StateCaptured || item.Thought.CurrentState == core.StateResting:
+			zones[1].Thoughts = append(zones[1].Thoughts, item)
+		default:
+			zones[2].Thoughts = append(zones[2].Thoughts, item)
+		}
+	}
+
+	return zones
 }
 
 func (s *Service) loadAllThoughts() ([]GardenThought, error) {
