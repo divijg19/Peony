@@ -1,6 +1,6 @@
 module github.com/divijg19/peony
 
-go 1.25.8
+go 1.26.3
 
 require (
 	github.com/charmbracelet/bubbles v1.0.0
