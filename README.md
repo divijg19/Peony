@@ -33,6 +33,14 @@ a quiet place for thoughts that are *not ready yet*.
 
 ---
 
+## Why `Peony`?
+
+Peonies bloom slowly.
+They do not rush, yet they are unmistakably full.
+
+`Peony` exists for thoughts that need **time, space, and kindness**.
+
+
 ## Core Philosophy
 
 ### Thoughts are seeds, not obligations
@@ -290,15 +298,6 @@ AI integration, if ever added, will be:
 * opt-in
 * reflective only
 * non-prescriptive
-
----
-
-## Why `Peony`?
-
-Peonies bloom slowly.
-They do not rush, yet they are unmistakably full.
-
-`Peony` exists for thoughts that need **time, space, and kindness**.
 
 ---
 

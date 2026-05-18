@@ -28,17 +28,32 @@ func TestReleaseWorkflowBuildsSinglePeonyBinaryAssets(t *testing.T) {
 	for _, want := range []string{
 		"RELEASE_TAG:",
 		"inputs.tag",
-		"peony_${RELEASE_TAG}_${goos}_${goarch}",
+		"jobs:",
+		"test:",
+		"build:",
+		"release:",
+		"strategy:",
+		"matrix:",
+		"actions/upload-artifact@v4",
+		"actions/download-artifact@v4",
+		"peony_${RELEASE_TAG}_${GOOS}_${GOARCH}",
 		"go vet ./...",
 		"go test ./...",
 		"go build \\",
 		"-trimpath",
 		"./cmd/peony",
 		"tar --sort=name",
+		"sha256sum \"${expected[@]}\" > checksums.txt",
 		"checksums.txt",
 		"manifest.txt",
 		"fail_on_unmatched_files: true",
+		"overwrite_files: true",
 		"softprops/action-gh-release@v3",
+		"release/peony_${{ env.RELEASE_TAG }}_linux_amd64.tar.gz",
+		"release/peony_${{ env.RELEASE_TAG }}_linux_arm64.tar.gz",
+		"release/peony_${{ env.RELEASE_TAG }}_darwin_amd64.tar.gz",
+		"release/peony_${{ env.RELEASE_TAG }}_darwin_arm64.tar.gz",
+		"release/checksums.txt",
 	} {
 		if !strings.Contains(source, want) {
 			t.Fatalf("release workflow missing %q", want)
@@ -46,6 +61,9 @@ func TestReleaseWorkflowBuildsSinglePeonyBinaryAssets(t *testing.T) {
 	}
 	if strings.Contains(source, "cmd/bloom") || strings.Contains(source, "/bloom") {
 		t.Fatal("release workflow should not build or package a standalone bloom binary")
+	}
+	if strings.Contains(source, "<<EOF") || strings.Contains(source, "<<'EOF'") {
+		t.Fatal("release workflow should not use YAML-fragile heredocs")
 	}
 }
 

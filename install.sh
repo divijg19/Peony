@@ -23,8 +23,10 @@ Options:
   --shell bash|zsh           Choose which shell rc file to update when aliasing is enabled.
   -h, --help                 Show this help text.
 
-Release archives are expected to contain one binary:
+Release archives are expected to ship one executable binary:
   peony
+
+The installer verifies the downloaded archive against the release checksums.txt file.
 EOF
 }
 
@@ -84,6 +86,51 @@ asset_url_for() {
   local asset_name
   asset_name="$(asset_name_for "${version}" "${os_name}" "${arch}")"
   echo "${BASE_URL}/${version}/${asset_name}"
+}
+
+checksums_url_for() {
+  local version="$1"
+  echo "${BASE_URL}/${version}/checksums.txt"
+}
+
+require_value() {
+  local option="$1"
+  local value="${2:-}"
+  if [[ -z "${value}" || "${value}" == --* ]]; then
+    echo "${option} requires a value" >&2
+    usage >&2
+    exit 1
+  fi
+}
+
+verify_checksum() {
+  local archive_path="$1"
+  local asset_name="$2"
+  local checksums_path="$3"
+  local expected actual
+
+  expected="$(awk -v asset="${asset_name}" '$2 == asset { print $1 }' "${checksums_path}")"
+  if [[ -z "${expected}" ]]; then
+    echo "checksums.txt did not contain ${asset_name}" >&2
+    exit 1
+  fi
+
+  if command -v sha256sum >/dev/null 2>&1; then
+    printf '%s  %s\n' "${expected}" "${archive_path}" | sha256sum -c - >/dev/null
+    return
+  fi
+
+  if command -v shasum >/dev/null 2>&1; then
+    actual="$(shasum -a 256 "${archive_path}" | awk '{ print $1 }')"
+    if [[ "${actual}" != "${expected}" ]]; then
+      echo "checksum mismatch for ${asset_name}" >&2
+      exit 1
+    fi
+    return
+  fi
+
+  echo "cannot verify checksum: sha256sum or shasum is required" >&2
+  exit 1
 }
 
 resolve_rc_file() {
@@ -150,11 +197,13 @@ main() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --version)
-        VERSION="${2:-}"
+        require_value "$1" "${2:-}"
+        VERSION="$2"
         shift 2
         ;;
       --bin-dir)
-        BIN_DIR="${2:-}"
+        require_value "$1" "${2:-}"
+        BIN_DIR="$2"
         shift 2
         ;;
       --alias)
@@ -162,7 +211,16 @@ main() {
         shift
         ;;
       --shell)
-        TARGET_SHELL="${2:-}"
+        require_value "$1" "${2:-}"
+        TARGET_SHELL="$2"
+        case "${TARGET_SHELL}" in
+          bash|zsh) ;;
+          *)
+            echo "--shell must be bash or zsh" >&2
+            usage >&2
+            exit 1
+            ;;
+        esac
         shift 2
         ;;
       -h|--help)
@@ -177,19 +235,23 @@ main() {
     esac
   done
 
-  local os_name arch version asset_name asset_url tmp_dir archive_path extract_dir rc_file
+  local os_name arch version asset_name asset_url checksums_url tmp_dir archive_path checksums_path extract_dir rc_file
   os_name="$(detect_os)"
   arch="$(detect_arch)"
   version="$(resolve_version)"
   asset_name="$(asset_name_for "${version}" "${os_name}" "${arch}")"
   asset_url="$(asset_url_for "${version}" "${os_name}" "${arch}")"
+  checksums_url="$(checksums_url_for "${version}")"
   tmp_dir="$(mktemp -d)"
   archive_path="${tmp_dir}/${asset_name}"
+  checksums_path="${tmp_dir}/checksums.txt"
   extract_dir="${tmp_dir}/extract"
   trap 'rm -rf "${tmp_dir:-}"' EXIT
 
   echo "Installing Peony ${version} for ${os_name}/${arch}..."
   curl -fsSL "${asset_url}" -o "${archive_path}"
+  curl -fsSL "${checksums_url}" -o "${checksums_path}"
+  verify_checksum "${archive_path}" "${asset_name}" "${checksums_path}"
   mkdir -p "${extract_dir}"
   tar -xzf "${archive_path}" -C "${extract_dir}"
 
@@ -198,6 +260,7 @@ main() {
     exit 1
   fi
   install_binary "${extract_dir}/peony" "peony"
+  echo "Verified: ${asset_name}"
   echo "Installed: ${BIN_DIR}/peony"
 
   if [[ "${ENABLE_ALIAS}" -eq 1 ]]; then
