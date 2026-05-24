@@ -1,12 +1,14 @@
 package tui
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/divijg19/peony/internal/app"
 	"github.com/divijg19/peony/internal/core"
@@ -29,10 +31,10 @@ func newTestModel(t *testing.T) Model {
 	return NewModel(service)
 }
 
-func withReadyThoughts(t *testing.T) {
+func withSettleDuration(t *testing.T, duration time.Duration) {
 	t.Helper()
 	previous := core.SettleDuration
-	core.SettleDuration = 0
+	core.SettleDuration = duration
 	t.Cleanup(func() {
 		core.SettleDuration = previous
 	})
@@ -47,24 +49,47 @@ func runeKey(r rune) tea.KeyMsg {
 	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}}
 }
 
-func TestModelAddSaveAndCancel(t *testing.T) {
-	withReadyThoughts(t)
+func sized(m Model, width, height int) Model {
+	next, _ := m.Update(tea.WindowSizeMsg{Width: width, Height: height})
+	return next.(Model)
+}
+
+func assertViewFits(t *testing.T, m Model, width, height int) string {
+	t.Helper()
+	m = sized(m, width, height)
+	view := m.View()
+	if got := lipgloss.Width(view); got > width {
+		t.Fatalf("view width = %d, want <= %d\n%s", got, width, view)
+	}
+	if got := lipgloss.Height(view); got > height {
+		t.Fatalf("view height = %d, want <= %d\n%s", got, height, view)
+	}
+	return view
+}
+
+func TestModelCaptureSaveCancelAndEmptyValidation(t *testing.T) {
+	withSettleDuration(t, 0)
 	m := newTestModel(t)
 
 	m = press(m, runeKey('a'))
-	if m.mode != modeAdd {
-		t.Fatalf("mode = %v, want add", m.mode)
+	if m.mode != ModeCapture {
+		t.Fatalf("mode = %v, want capture", m.mode)
 	}
+	m = press(m, tea.KeyMsg{Type: tea.KeyCtrlS})
+	if m.mode != ModeCapture {
+		t.Fatalf("empty save should stay in capture mode, got %v", m.mode)
+	}
+	if !strings.Contains(m.status, "empty") {
+		t.Fatalf("empty save status = %q, want validation", m.status)
+	}
+
 	m.addBox.SetValue("a quiet thought")
 	m = press(m, tea.KeyMsg{Type: tea.KeyCtrlS})
-	if m.mode != modeBrowse {
+	if m.mode != ModeBrowse {
 		t.Fatalf("mode after save = %v, want browse", m.mode)
 	}
-	if len(m.snapshot.Thoughts) != 1 {
-		t.Fatalf("thought count = %d, want 1", len(m.snapshot.Thoughts))
-	}
-	if got := m.snapshot.Thoughts[0].Thought.Content; got != "a quiet thought" {
-		t.Fatalf("content = %q", got)
+	if len(m.snapshot.Thoughts) != 1 || m.snapshot.Thoughts[0].Thought.Content != "a quiet thought" {
+		t.Fatalf("unexpected queue after save: %+v", m.snapshot.Thoughts)
 	}
 
 	m = press(m, runeKey('a'))
@@ -75,8 +100,8 @@ func TestModelAddSaveAndCancel(t *testing.T) {
 	}
 }
 
-func TestModelTendThenRest(t *testing.T) {
-	withReadyThoughts(t)
+func TestModelTendSaveCancelAndRest(t *testing.T) {
+	withSettleDuration(t, 0)
 	m := newTestModel(t)
 	id, err := m.service.Capture("rough edge")
 	if err != nil {
@@ -85,168 +110,176 @@ func TestModelTendThenRest(t *testing.T) {
 	m.reloadPreserving(id)
 
 	m = press(m, runeKey('t'))
-	if m.mode != modeTend {
+	if m.mode != ModeTend {
 		t.Fatalf("mode = %v, want tend", m.mode)
 	}
 	m.tendContent.SetValue("rough edge, softened")
 	m.tendNote.SetValue("left a note")
 	m = press(m, tea.KeyMsg{Type: tea.KeyCtrlS})
-	if m.mode != modeBrowse {
+	if m.mode != ModeBrowse {
 		t.Fatalf("mode after tend = %v, want browse", m.mode)
 	}
 	item, ok := m.selectedItem()
-	if !ok {
-		t.Fatal("expected selected tended thought")
-	}
-	if got := item.Thought.CurrentState; got != core.StateTended {
-		t.Fatalf("state after tend = %s, want tended", got)
+	if !ok || item.Thought.CurrentState != core.StateTended {
+		t.Fatalf("expected selected tended thought, got %+v", item.Thought)
 	}
 
 	m = press(m, runeKey('r'))
 	item, ok = m.selectedItem()
-	if !ok {
-		t.Fatal("expected selected rested thought")
+	if !ok || item.Thought.CurrentState != core.StateResting {
+		t.Fatalf("expected rested thought, got %+v", item.Thought)
 	}
-	if got := item.Thought.CurrentState; got != core.StateResting {
-		t.Fatalf("state after rest = %s, want resting", got)
-	}
-	if !item.Thought.EligibilityAt.After(time.Now().UTC().Add(-time.Second)) {
-		t.Fatal("rest should refresh eligibility time")
-	}
+
 }
 
-func TestModelFilteringSearchAndNavigation(t *testing.T) {
-	withReadyThoughts(t)
+func TestFocusedQueueFilteringSearchAndOrdering(t *testing.T) {
 	m := newTestModel(t)
-	firstID, err := m.service.Capture("alpha seed")
+	withSettleDuration(t, 0)
+	readyID, err := m.service.Capture("ready alpha")
 	if err != nil {
-		t.Fatalf("capture first: %v", err)
+		t.Fatalf("capture ready: %v", err)
 	}
-	if _, err := m.service.Capture("beta seed"); err != nil {
-		t.Fatalf("capture second: %v", err)
+	tendedID, err := m.service.Capture("tended beta")
+	if err != nil {
+		t.Fatalf("capture tended: %v", err)
 	}
-	if err := m.service.Evolve(firstID); err != nil {
-		t.Fatalf("evolve first: %v", err)
+	if err := m.service.Tend(tendedID, "tended beta", nil); err != nil {
+		t.Fatalf("tend beta: %v", err)
 	}
+
+	previous := core.SettleDuration
+	core.SettleDuration = time.Hour
+	restingID, err := m.service.Capture("settling gamma")
+	core.SettleDuration = previous
+	if err != nil {
+		t.Fatalf("capture resting: %v", err)
+	}
+
+	memoryID, err := m.service.Capture("memory delta")
+	if err != nil {
+		t.Fatalf("capture memory: %v", err)
+	}
+	if err := m.service.Evolve(memoryID); err != nil {
+		t.Fatalf("evolve memory: %v", err)
+	}
+
 	m.reloadPreserving(0)
+	if m.filter != FilterReady {
+		t.Fatalf("filter = %v, want ready", m.filter)
+	}
+	if len(m.snapshot.Thoughts) != 2 {
+		t.Fatalf("ready queue count = %d, want 2", len(m.snapshot.Thoughts))
+	}
+	if m.snapshot.Thoughts[0].Thought.ID != readyID || m.snapshot.Thoughts[1].Thought.ID != tendedID {
+		t.Fatalf("ready ordering = [%d %d], want ready then tended", m.snapshot.Thoughts[0].Thought.ID, m.snapshot.Thoughts[1].Thought.ID)
+	}
 
 	m = press(m, tea.KeyMsg{Type: tea.KeyRight})
-	if m.zoneIndex != 1 {
-		t.Fatalf("zone index = %d, want resting zone", m.zoneIndex)
+	if m.filter != FilterResting || len(m.snapshot.Thoughts) != 1 || m.snapshot.Thoughts[0].Thought.ID != restingID {
+		t.Fatalf("resting filter mismatch: filter=%v thoughts=%+v", m.filter, m.snapshot.Thoughts)
+	}
+	m = press(m, tea.KeyMsg{Type: tea.KeyRight})
+	if m.filter != FilterMemory || len(m.snapshot.Thoughts) != 1 || m.snapshot.Thoughts[0].Thought.ID != memoryID {
+		t.Fatalf("memory filter mismatch: filter=%v thoughts=%+v", m.filter, m.snapshot.Thoughts)
 	}
 
 	m = press(m, runeKey('/'))
-	m.search.SetValue("beta")
+	m.search.SetValue("gamma")
 	m = press(m, tea.KeyMsg{Type: tea.KeyEnter})
-	if len(m.snapshot.Thoughts) != 1 || m.snapshot.Thoughts[0].Thought.Content != "beta seed" {
-		t.Fatalf("unexpected search results: %+v", m.snapshot.Thoughts)
-	}
-
-	m = press(m, runeKey('f'))
-	m = press(m, tea.KeyMsg{Type: tea.KeyDown})
-	m = press(m, tea.KeyMsg{Type: tea.KeyEnter})
-	if m.filter != core.StateCaptured {
-		t.Fatalf("filter = %q, want captured", m.filter)
-	}
-	if len(m.snapshot.Thoughts) != 1 {
-		t.Fatalf("captured filter count = %d, want 1", len(m.snapshot.Thoughts))
+	if !strings.Contains(m.status, "No matching thought") {
+		t.Fatalf("search status = %q, want gentle empty", m.status)
 	}
 }
 
-func TestModelEvolveArchiveAndReleaseCancel(t *testing.T) {
-	withReadyThoughts(t)
+func TestLayoutFitsWideMediumCompactAndSmall(t *testing.T) {
+	withSettleDuration(t, 0)
 	m := newTestModel(t)
-	firstID, err := m.service.Capture("first")
-	if err != nil {
-		t.Fatalf("capture first: %v", err)
-	}
-	secondID, err := m.service.Capture("second")
-	if err != nil {
-		t.Fatalf("capture second: %v", err)
-	}
-	m.reloadPreserving(firstID)
-
-	m = press(m, runeKey('e'))
-	item, ok := m.selectedItem()
-	if !ok {
-		t.Fatal("expected selected evolved thought")
-	}
-	if got := item.Thought.CurrentState; got != core.StateEvolved {
-		t.Fatalf("state after evolve = %s, want evolved", got)
-	}
-
-	m.reloadPreserving(secondID)
-	m = press(m, runeKey('A'))
-	item, ok = m.selectedItem()
-	if !ok {
-		t.Fatal("expected selected archived thought")
-	}
-	if got := item.Thought.CurrentState; got != core.StateArchived {
-		t.Fatalf("state after archive = %s, want archived", got)
-	}
-
-	m = press(m, runeKey('x'))
-	if m.mode != modeReleaseConfirm {
-		t.Fatalf("mode = %v, want release confirm", m.mode)
-	}
-	m = press(m, runeKey('n'))
-	if m.mode != modeBrowse {
-		t.Fatalf("mode after cancel = %v, want browse", m.mode)
-	}
-	if len(m.snapshot.Thoughts) != 2 {
-		t.Fatalf("thought count after cancel = %d, want 2", len(m.snapshot.Thoughts))
-	}
-}
-
-func TestModelZoneNavigationHelpFilterAndCompactRendering(t *testing.T) {
-	withReadyThoughts(t)
-	m := newTestModel(t)
-	if _, err := m.service.Capture("alpha"); err != nil {
-		t.Fatalf("capture alpha: %v", err)
+	for i := 0; i < 5; i++ {
+		if _, err := m.service.Capture(fmt.Sprintf("thought %d", i)); err != nil {
+			t.Fatalf("capture: %v", err)
+		}
 	}
 	m.reloadPreserving(0)
 
-	if len(m.snapshot.Zones) != 3 {
-		t.Fatalf("zone count = %d, want 3", len(m.snapshot.Zones))
+	for _, size := range []struct{ width, height int }{{120, 36}, {100, 30}, {76, 24}, {54, 16}} {
+		view := assertViewFits(t, m, size.width, size.height)
+		if strings.Contains(view, "Garden") || strings.Contains(view, "terminal garden") {
+			t.Fatalf("view should not include Garden copy: %q", view)
+		}
 	}
-	m = press(m, tea.KeyMsg{Type: tea.KeyRight})
-	if m.zoneIndex != 1 {
-		t.Fatalf("zone index after right = %d, want 1", m.zoneIndex)
+	view := assertViewFits(t, m, 50, 14)
+	if !strings.Contains(view, "more room") {
+		t.Fatalf("small view missing minimum-size message: %q", view)
 	}
-	m = press(m, tea.KeyMsg{Type: tea.KeyLeft})
-	if m.zoneIndex != 0 {
-		t.Fatalf("zone index after left = %d, want 0", m.zoneIndex)
+}
+
+func TestQueueAndDetailScrolling(t *testing.T) {
+	withSettleDuration(t, 0)
+	m := newTestModel(t)
+	for i := 0; i < 24; i++ {
+		if _, err := m.service.Capture(fmt.Sprintf("scroll thought %02d", i)); err != nil {
+			t.Fatalf("capture: %v", err)
+		}
+	}
+	m.reloadPreserving(0)
+	m = sized(m, 90, 24)
+	for i := 0; i < 14; i++ {
+		m = press(m, tea.KeyMsg{Type: tea.KeyDown})
+	}
+	if m.queueOffset == 0 {
+		t.Fatal("queue offset should advance after moving beyond visible rows")
 	}
 
-	m = press(m, runeKey('?'))
-	if m.mode != modeHelp {
-		t.Fatalf("mode = %v, want help", m.mode)
+	m = press(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = press(m, tea.KeyMsg{Type: tea.KeyCtrlD})
+	if m.detailOffset == 0 {
+		t.Fatal("detail offset should advance when detail is focused and Ctrl+D is pressed")
 	}
-	if view := m.View(); !strings.Contains(view, "Bloom is Peony's terminal garden") {
-		t.Fatalf("help view missing Bloom copy: %q", view)
+	m = press(m, tea.KeyMsg{Type: tea.KeyCtrlU})
+	if m.detailOffset != 0 {
+		t.Fatalf("detail offset = %d, want 0 after Ctrl+U", m.detailOffset)
+	}
+}
+
+func TestBottomRailModes(t *testing.T) {
+	withSettleDuration(t, 0)
+	m := newTestModel(t)
+	if _, err := m.service.Capture("alpha"); err != nil {
+		t.Fatalf("capture: %v", err)
+	}
+	m.reloadPreserving(0)
+	m = sized(m, 120, 32)
+
+	browse := m.View()
+	for _, want := range []string{"Move gently", "a capture", "x release"} {
+		if !strings.Contains(browse, want) {
+			t.Fatalf("browse rail missing %q: %q", want, browse)
+		}
+	}
+
+	m = press(m, runeKey('/'))
+	search := m.View()
+	if !strings.Contains(search, "Search") || !strings.Contains(search, "Enter apply") {
+		t.Fatalf("search rail incomplete: %q", search)
 	}
 	m = press(m, tea.KeyMsg{Type: tea.KeyEsc})
 
 	m = press(m, runeKey('f'))
-	if m.mode != modeFilter {
-		t.Fatalf("mode = %v, want filter", m.mode)
+	filter := m.View()
+	if !strings.Contains(filter, "Ready") || !strings.Contains(filter, "Memory") || !strings.Contains(filter, "h/l choose") {
+		t.Fatalf("filter rail incomplete: %q", filter)
 	}
-	m = press(m, tea.KeyMsg{Type: tea.KeyDown})
-	m = press(m, tea.KeyMsg{Type: tea.KeyEnter})
-	if m.filter != core.StateCaptured {
-		t.Fatalf("filter = %q, want captured", m.filter)
-	}
+	m = press(m, tea.KeyMsg{Type: tea.KeyEsc})
 
-	next, _ := m.Update(tea.WindowSizeMsg{Width: 70, Height: 24})
-	m = next.(Model)
-	m = press(m, tea.KeyMsg{Type: tea.KeyTab})
-	if !m.detailFocus {
-		t.Fatal("tab in compact layout should focus detail pane")
+	m = press(m, runeKey('x'))
+	release := m.View()
+	if !strings.Contains(release, "Release #1 permanently") || !strings.Contains(release, "reindexes local IDs") {
+		t.Fatalf("release rail incomplete: %q", release)
 	}
 }
 
-func TestModelReleasePermanentConfirmation(t *testing.T) {
-	withReadyThoughts(t)
+func TestReleasePermanentConfirmation(t *testing.T) {
+	withSettleDuration(t, 0)
 	m := newTestModel(t)
 	if _, err := m.service.Capture("first"); err != nil {
 		t.Fatalf("capture first: %v", err)
@@ -257,9 +290,15 @@ func TestModelReleasePermanentConfirmation(t *testing.T) {
 	m.reloadPreserving(1)
 
 	m = press(m, runeKey('x'))
-	if m.mode != modeReleaseConfirm {
+	if m.mode != ModeReleaseConfirm {
 		t.Fatalf("mode = %v, want release confirm", m.mode)
 	}
+	m = press(m, runeKey('n'))
+	if len(m.snapshot.Thoughts) != 2 || m.mode != ModeBrowse {
+		t.Fatalf("release cancel changed state: mode=%v count=%d", m.mode, len(m.snapshot.Thoughts))
+	}
+
+	m = press(m, runeKey('x'))
 	m = press(m, runeKey('y'))
 	if len(m.snapshot.Thoughts) != 1 {
 		t.Fatalf("thought count after release = %d, want 1", len(m.snapshot.Thoughts))
