@@ -61,6 +61,9 @@ func assertViewFits(t *testing.T, m Model, width, height int) string {
 	if got := lipgloss.Width(view); got > width {
 		t.Fatalf("view width = %d, want <= %d\n%s", got, width, view)
 	}
+	if got := lipgloss.Width(view); got != width {
+		t.Fatalf("view width = %d, want exactly %d to avoid right-side slack\n%s", got, width, view)
+	}
 	if got := lipgloss.Height(view); got > height {
 		t.Fatalf("view height = %d, want <= %d\n%s", got, height, view)
 	}
@@ -256,10 +259,17 @@ func TestBottomRailModes(t *testing.T) {
 			t.Fatalf("browse rail missing %q: %q", want, browse)
 		}
 	}
+	lines := strings.Split(browse, "\n")
+	if !strings.Contains(lines[len(lines)-1], "q quit") {
+		t.Fatalf("keybinding row should sit on the bottom edge: %q", lines[len(lines)-1])
+	}
+	if strings.Contains(browse, "filter") {
+		t.Fatalf("browse view should use showing/focus language, not filter copy: %q", browse)
+	}
 
 	m = press(m, runeKey('/'))
 	search := m.View()
-	if !strings.Contains(search, "Search") || !strings.Contains(search, "Enter apply") {
+	if !strings.Contains(search, "Search") || !strings.Contains(search, "enter apply") {
 		t.Fatalf("search rail incomplete: %q", search)
 	}
 	m = press(m, tea.KeyMsg{Type: tea.KeyEsc})

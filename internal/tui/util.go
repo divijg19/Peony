@@ -102,9 +102,14 @@ func widthLines(lines []string, width int) []string {
 }
 
 func renderBox(style lipgloss.Style, width, height int, content string) string {
-	contentWidth := maxInt(1, width-style.GetHorizontalFrameSize())
-	contentHeight := maxInt(1, height-style.GetVerticalFrameSize())
+	contentWidth := maxInt(1, width-2)
+	contentHeight := maxInt(1, height-2)
 	return style.Width(contentWidth).Height(contentHeight).Render(content)
+}
+
+func renderRailRow(style lipgloss.Style, width int, content string) string {
+	contentWidth := maxInt(1, width-style.GetHorizontalFrameSize())
+	return style.Width(contentWidth).Render(oneLine(content, maxInt(1, contentWidth-2)))
 }
 
 func alignRow(width int, left string, right string) string {
