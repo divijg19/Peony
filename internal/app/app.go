@@ -55,14 +55,44 @@ func NewForDB(db *sql.DB) (*Service, error) {
 	return New(st), nil
 }
 
-// GardenThought is the TUI-friendly projection of a thought.
-type GardenThought struct {
+// BloomThought is the TUI-friendly projection of a thought.
+type BloomThought struct {
 	Thought core.Thought
 	Events  []core.Event
 	Ready   bool
 }
 
-// ZoneKind identifies one of Bloom's high-level garden zones.
+// GardenThought is kept as a compatibility alias for older internal callers.
+type GardenThought = BloomThought
+
+// BloomFilterKind identifies one of Bloom's focused queue filters.
+type BloomFilterKind string
+
+const (
+	BloomFilterReady   BloomFilterKind = "ready"
+	BloomFilterResting BloomFilterKind = "resting"
+	BloomFilterMemory  BloomFilterKind = "memory"
+	BloomFilterAll     BloomFilterKind = "all"
+)
+
+// BloomCounts contains queue counts for Bloom filter tabs.
+type BloomCounts struct {
+	Ready   int
+	Resting int
+	Memory  int
+	All     int
+}
+
+// BloomSnapshot is the current browse state for Bloom's focused queue.
+type BloomSnapshot struct {
+	Thoughts   []BloomThought
+	Counts     BloomCounts
+	ReadyCount int
+	Filter     BloomFilterKind
+	Query      string
+}
+
+// ZoneKind identifies one of Bloom's legacy high-level groups.
 type ZoneKind string
 
 const (
@@ -71,15 +101,18 @@ const (
 	ZoneMemory  ZoneKind = "memory"
 )
 
-// GardenZone groups thoughts by the way they should feel in Bloom.
-type GardenZone struct {
+// BloomGroup groups thoughts by the way they should feel in Bloom.
+type BloomGroup struct {
 	Kind     ZoneKind
 	Title    string
 	Empty    string
-	Thoughts []GardenThought
+	Thoughts []BloomThought
 }
 
-// GardenSnapshot is the current browse state for the terminal garden.
+// GardenZone is kept as a compatibility alias for older internal callers.
+type GardenZone = BloomGroup
+
+// GardenSnapshot is the current browse state for the legacy grouped projection.
 type GardenSnapshot struct {
 	Thoughts   []GardenThought
 	Zones      []GardenZone
@@ -165,6 +198,67 @@ func (s *Service) Snapshot(filter core.State, query string) (GardenSnapshot, err
 	return GardenSnapshot{
 		Thoughts:   thoughts,
 		Zones:      zones,
+		ReadyCount: readyCount,
+		Filter:     filter,
+		Query:      query,
+	}, nil
+}
+
+// SnapshotBloom returns a filtered, searchable focused-queue projection for Bloom.
+func (s *Service) SnapshotBloom(filter BloomFilterKind, query string) (BloomSnapshot, error) {
+	if s == nil || s.store == nil {
+		return BloomSnapshot{}, fmt.Errorf("snapshot: service is nil")
+	}
+	if filter == "" {
+		filter = BloomFilterReady
+	}
+
+	all, err := s.loadAllThoughts()
+	if err != nil {
+		return BloomSnapshot{}, err
+	}
+
+	query = strings.ToLower(strings.TrimSpace(query))
+	now := time.Now().UTC()
+	thoughts := make([]BloomThought, 0, len(all))
+	counts := BloomCounts{}
+	readyCount := 0
+
+	for _, item := range all {
+		item.Ready = core.EligibleToSurface(item.Thought, now)
+		if item.Ready {
+			readyCount++
+		}
+		if item.Thought.CurrentState == core.StateReleased {
+			continue
+		}
+		if query != "" && !matchesQuery(item, query) {
+			continue
+		}
+
+		category := bloomCategory(item)
+		switch category {
+		case BloomFilterReady:
+			counts.Ready++
+		case BloomFilterResting:
+			counts.Resting++
+		case BloomFilterMemory:
+			counts.Memory++
+		}
+		counts.All++
+
+		if filter == BloomFilterAll || filter == category {
+			thoughts = append(thoughts, item)
+		}
+	}
+
+	sort.SliceStable(thoughts, func(i, j int) bool {
+		return bloomLess(thoughts[i], thoughts[j])
+	})
+
+	return BloomSnapshot{
+		Thoughts:   thoughts,
+		Counts:     counts,
 		ReadyCount: readyCount,
 		Filter:     filter,
 		Query:      query,
@@ -303,4 +397,43 @@ func normalizeNote(note *string) *string {
 		return nil
 	}
 	return &trimmed
+}
+
+func bloomCategory(item BloomThought) BloomFilterKind {
+	switch {
+	case item.Ready || item.Thought.CurrentState == core.StateTended:
+		return BloomFilterReady
+	case item.Thought.CurrentState == core.StateCaptured || item.Thought.CurrentState == core.StateResting:
+		return BloomFilterResting
+	default:
+		return BloomFilterMemory
+	}
+}
+
+func bloomLess(left BloomThought, right BloomThought) bool {
+	leftRank := bloomRank(left)
+	rightRank := bloomRank(right)
+	if leftRank != rightRank {
+		return leftRank < rightRank
+	}
+	if left.Ready && right.Ready && !left.Thought.EligibilityAt.Equal(right.Thought.EligibilityAt) {
+		return left.Thought.EligibilityAt.Before(right.Thought.EligibilityAt)
+	}
+	if !left.Thought.UpdatedAt.Equal(right.Thought.UpdatedAt) {
+		return left.Thought.UpdatedAt.After(right.Thought.UpdatedAt)
+	}
+	return left.Thought.ID < right.Thought.ID
+}
+
+func bloomRank(item BloomThought) int {
+	switch {
+	case item.Ready:
+		return 0
+	case item.Thought.CurrentState == core.StateTended:
+		return 1
+	case item.Thought.CurrentState == core.StateCaptured || item.Thought.CurrentState == core.StateResting:
+		return 2
+	default:
+		return 3
+	}
 }

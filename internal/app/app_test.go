@@ -89,6 +89,65 @@ func TestBuildZonesGroupsThoughtsByBloomMeaning(t *testing.T) {
 	}
 }
 
+func TestSnapshotBloomFocusedQueueFiltersAndCounts(t *testing.T) {
+	service := newTestService(t)
+	withSettleDuration(t, 0)
+	readyID, err := service.Capture("ready item")
+	if err != nil {
+		t.Fatalf("capture ready: %v", err)
+	}
+	tendedID, err := service.Capture("tended item")
+	if err != nil {
+		t.Fatalf("capture tended: %v", err)
+	}
+	if err := service.Tend(tendedID, "tended item", nil); err != nil {
+		t.Fatalf("tend: %v", err)
+	}
+
+	previous := core.SettleDuration
+	core.SettleDuration = time.Hour
+	restingID, err := service.Capture("resting item")
+	core.SettleDuration = previous
+	if err != nil {
+		t.Fatalf("capture resting: %v", err)
+	}
+
+	memoryID, err := service.Capture("memory item")
+	if err != nil {
+		t.Fatalf("capture memory: %v", err)
+	}
+	if err := service.Archive(memoryID); err != nil {
+		t.Fatalf("archive: %v", err)
+	}
+
+	snapshot, err := service.SnapshotBloom(BloomFilterReady, "")
+	if err != nil {
+		t.Fatalf("snapshot ready: %v", err)
+	}
+	if snapshot.Counts.Ready != 2 || snapshot.Counts.Resting != 1 || snapshot.Counts.Memory != 1 || snapshot.Counts.All != 4 {
+		t.Fatalf("counts = %+v, want ready/resting/memory/all 2/1/1/4", snapshot.Counts)
+	}
+	if len(snapshot.Thoughts) != 2 || snapshot.Thoughts[0].Thought.ID != readyID || snapshot.Thoughts[1].Thought.ID != tendedID {
+		t.Fatalf("ready queue = %+v, want ready then tended", snapshot.Thoughts)
+	}
+
+	snapshot, err = service.SnapshotBloom(BloomFilterResting, "")
+	if err != nil {
+		t.Fatalf("snapshot resting: %v", err)
+	}
+	if len(snapshot.Thoughts) != 1 || snapshot.Thoughts[0].Thought.ID != restingID {
+		t.Fatalf("resting queue = %+v", snapshot.Thoughts)
+	}
+
+	snapshot, err = service.SnapshotBloom(BloomFilterMemory, "memory")
+	if err != nil {
+		t.Fatalf("snapshot memory search: %v", err)
+	}
+	if len(snapshot.Thoughts) != 1 || snapshot.Thoughts[0].Thought.ID != memoryID {
+		t.Fatalf("memory search = %+v", snapshot.Thoughts)
+	}
+}
+
 func TestTendRestEvolveArchiveAndRelease(t *testing.T) {
 	withSettleDuration(t, 0)
 	service := newTestService(t)
