@@ -8,73 +8,112 @@ import (
 )
 
 func (m Model) promptRailView(layout frameLayout) string {
-	body := m.browseRail()
+	prompt, hints := m.railContent(layout.contentWidth)
+	prompt = renderRailRow(railPromptStyle, layout.contentWidth, prompt)
+	keys := renderRailRow(railKeyStyle, layout.contentWidth, m.keyLegend(hints, layout.contentWidth-6))
+	return strings.Join([]string{prompt, keys}, "\n")
+}
+
+func (m Model) railContent(width int) (string, []keyHint) {
 	switch m.mode {
 	case ModeSearch:
-		body = m.searchRail()
+		return m.searchPrompt(width), searchKeyHints
 	case ModeFilter:
-		body = m.filterRail()
+		return m.filterPrompt(), filterKeyHints
 	case ModeReleaseConfirm:
-		body = m.releaseRail(layout.contentWidth)
+		return m.releasePrompt(width), releaseKeyHints
 	case ModeCapture:
-		body = railLines("Hold the thought in its original shape.", "Ctrl+S save  Esc cancel")
+		return m.capturePrompt(), captureKeyHints
 	case ModeTend:
-		body = railLines("Revise softly, then decide what comes next.", "Tab switch fields  Ctrl+S mark tended  Esc cancel")
+		return m.tendPrompt(), tendKeyHints
 	case ModeHelp:
-		body = railLines("Key guidance for this view.", "Esc, Enter, ?, or q close help")
+		return "Key guidance for this view.", helpKeyHints
+	default:
+		return m.browsePrompt(), browseKeyHints
 	}
-	lines := strings.Split(clampRail(body, layout.contentWidth), "\n")
-	for len(lines) < 2 {
-		lines = append(lines, "")
-	}
-	separator := subtleStyle.Render(stringsRepeat("-", maxInt(1, layout.contentWidth-4)))
-	return strings.Join([]string{separator, oneLine(lines[0], layout.contentWidth-4), hintStyle.Render(oneLine(lines[1], layout.contentWidth-4))}, "\n")
 }
 
-func (m Model) browseRail() string {
+func (m Model) browsePrompt() string {
 	status := strings.TrimSpace(m.status)
-	if status == "" {
-		status = "Move gently. Open a thought when you want a closer look."
+	if status != "" {
+		return status
 	}
-	return railLines(status, browseKeyHelp)
+	item, ok := m.selectedItem()
+	if !ok {
+		return m.emptyText()
+	}
+	return fmt.Sprintf("Move gently. Open #%d when you want a closer look.", item.Thought.ID)
 }
 
-func (m Model) searchRail() string {
-	line := promptLabelStyle.Render("Search") + "  " + m.search.View()
-	return railLines(line, "Enter apply  Ctrl+U clear  Esc cancel")
+func (m Model) searchPrompt(width int) string {
+	inputWidth := maxInt(12, width-lipgloss.Width("Search  ")-4)
+	value := m.search.Value()
+	if strings.TrimSpace(value) == "" {
+		value = "search thoughts, states, notes, or ids"
+	}
+	return "Search  " + oneLine(value+"_", inputWidth)
 }
 
-func (m Model) filterRail() string {
+func (m Model) filterPrompt() string {
 	parts := make([]string, 0, len(filterKinds))
 	for i, kind := range filterKinds {
 		label := kind.label()
 		if i == m.filterIndex {
-			parts = append(parts, filterActiveStyle.Render(label))
-		} else {
-			parts = append(parts, filterStyle.Render(label))
+			label = "[" + label + "]"
 		}
+		parts = append(parts, label)
 	}
-	line := promptLabelStyle.Render("Filter") + "  " + strings.Join(parts, "  ")
-	return railLines(line, "h/l choose  Enter apply  Esc cancel")
+	return "Showing  " + strings.Join(parts, "  ")
 }
 
-func (m Model) releaseRail(width int) string {
+func (m Model) capturePrompt() string {
+	if strings.TrimSpace(m.status) != "" {
+		return m.status
+	}
+	return "Hold the thought in its original shape."
+}
+
+func (m Model) tendPrompt() string {
+	if strings.TrimSpace(m.status) != "" {
+		return m.status
+	}
+	if m.tendFocus == 1 {
+		return "Add a note if one belongs with this tending."
+	}
+	return "Revise softly, then decide what comes next."
+}
+
+func (m Model) releasePrompt(width int) string {
 	line := "Release this thought permanently? This deletes the thought, history, and reindexes local IDs."
 	if item, ok := m.selectedItem(); ok {
-		preview := oneLine(item.Thought.Content, maxInt(12, width-78))
-		line = fmt.Sprintf("Release #%d permanently? %s", item.Thought.ID, preview)
+		preview := oneLine(item.Thought.Content, maxInt(10, width-96))
+		line = fmt.Sprintf("Release #%d permanently? %s This deletes the thought, history, and reindexes local IDs.", item.Thought.ID, preview)
 	}
-	return railLines(promptLabelStyle.Render("Release")+"  "+line, "This deletes the thought, history, and reindexes local IDs.  y confirm  n cancel  Esc cancel")
+	return line
 }
 
-func railLines(first, second string) string {
-	return lipgloss.JoinVertical(lipgloss.Left, first, hintStyle.Render(second))
+func (m Model) keyLegend(hints []keyHint, width int) string {
+	if len(hints) == 0 {
+		return ""
+	}
+	if len(hints) > 6 {
+		return m.plainKeyLegend(hints, width)
+	}
+	parts := make([]string, 0, len(hints))
+	for _, hint := range hints {
+		parts = append(parts, keyStyle.Render(hint.Key)+" "+keyDescStyle.Render(hint.Label))
+	}
+	line := strings.Join(parts, "  ")
+	if lipgloss.Width(line) <= width {
+		return line
+	}
+	return m.plainKeyLegend(hints, width)
 }
 
-func clampRail(body string, width int) string {
-	lines := strings.Split(body, "\n")
-	for i, line := range lines {
-		lines[i] = oneLine(line, width)
+func (m Model) plainKeyLegend(hints []keyHint, width int) string {
+	plain := make([]string, 0, len(hints))
+	for _, hint := range hints {
+		plain = append(plain, hint.Key+" "+hint.Label)
 	}
-	return strings.Join(fitLines(lines, 2), "\n")
+	return oneLine(strings.Join(plain, "  "), width)
 }

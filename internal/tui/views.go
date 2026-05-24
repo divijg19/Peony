@@ -12,13 +12,32 @@ import (
 )
 
 func (m Model) headerView(layout frameLayout) string {
-	search := "none"
-	if strings.TrimSpace(m.query) != "" {
-		search = oneLine(m.query, 18)
+	line1 := alignRow(
+		layout.contentWidth,
+		titleStyle.Render("Bloom")+"  "+subtleStyle.Render("a soft place for unfinished thoughts"),
+		metaStrongStyle.Render(fmt.Sprintf("Ready %d", m.snapshot.ReadyCount)),
+	)
+	line2 := subtleStyle.Render(m.showingLine(layout.contentWidth))
+	return strings.Join([]string{line1, line2}, "\n")
+}
+
+func (m Model) showingLine(width int) string {
+	focus := "queue"
+	if m.focus == FocusDetail {
+		focus = "detail"
+	} else if m.focus == FocusPrompt {
+		focus = "prompt"
 	}
-	line1 := titleStyle.Render("Bloom") + "  " + metaStrongStyle.Render(fmt.Sprintf("Ready %d", m.snapshot.ReadyCount))
-	line2 := subtleStyle.Render(fmt.Sprintf("filter %s  |  search %s", strings.ToLower(m.filter.label()), search))
-	return strings.Join([]string{oneLine(line1, layout.contentWidth-2), oneLine(line2, layout.contentWidth-2)}, "\n")
+	parts := []string{fmt.Sprintf("Showing %s", m.filter.label()), fmt.Sprintf("%s focus", focus)}
+	if item, ok := m.selectedItem(); ok {
+		parts = append(parts, fmt.Sprintf("#%d %s", item.Thought.ID, m.stateLabel(item)))
+	} else {
+		parts = append(parts, "no thought selected")
+	}
+	if query := strings.TrimSpace(m.query); query != "" {
+		parts = append(parts, fmt.Sprintf("search %q", oneLine(query, 24)))
+	}
+	return oneLine(strings.Join(parts, "  ·  "), width)
 }
 
 func (m Model) queueView(width, height int) string {
@@ -89,7 +108,7 @@ func (m Model) queueRow(item app.BloomThought, width int, selected bool) []strin
 func (m Model) detailView(width, height int) string {
 	innerWidth := maxInt(12, width-paneStyle.GetHorizontalFrameSize())
 	innerHeight := maxInt(3, height-paneStyle.GetVerticalFrameSize())
-	lines := m.detailLines()
+	lines := m.detailLines(innerWidth)
 	if len(lines) == 0 {
 		lines = []string{"Select a thought to see its shape."}
 	}
@@ -109,7 +128,7 @@ func (m Model) detailView(width, height int) string {
 	return renderBox(style, width, height, content)
 }
 
-func (m Model) detailLines() []string {
+func (m Model) detailLines(width int) []string {
 	item, ok := m.selectedItem()
 	if !ok {
 		return nil
@@ -121,7 +140,7 @@ func (m Model) detailLines() []string {
 		fmt.Sprintf("%s  |  tended %d times", m.readinessLabel(item), t.TendCounter),
 		"",
 	}
-	lines = append(lines, wrapText(t.Content, 72, bodyTextStyle)...)
+	lines = append(lines, wrapText(t.Content, width, bodyTextStyle)...)
 	lines = append(lines,
 		"",
 		labelStyle.Render("When"),
@@ -140,7 +159,7 @@ func (m Model) detailLines() []string {
 			}
 			lines = append(lines, line)
 			if event.Note != nil && strings.TrimSpace(*event.Note) != "" {
-				lines = append(lines, subtleStyle.Render("  "+oneLine(*event.Note, 80)))
+				lines = append(lines, subtleStyle.Render("  "+oneLine(*event.Note, maxInt(8, width-2))))
 			}
 		}
 	}

@@ -302,7 +302,7 @@ func (m Model) updateFilter(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "esc":
 		m.mode = ModeBrowse
 		m.focus = FocusQueue
-		m.status = "Filter unchanged."
+		m.status = "Showing unchanged."
 	case "right", "l", "down", "j":
 		m.filterIndex = (m.filterIndex + 1) % len(filterKinds)
 	case "left", "h", "up", "k":
@@ -554,7 +554,9 @@ func (m *Model) ensureQueueVisible() {
 }
 
 func (m *Model) scrollDetail(delta int) {
-	lines := m.detailLines()
+	layout := m.layout()
+	innerWidth := maxInt(12, layout.detailWidth-paneStyle.GetHorizontalFrameSize())
+	lines := m.detailLines(innerWidth)
 	visible := m.detailVisibleLines()
 	maxOffset := len(lines) - visible
 	if maxOffset < 0 {

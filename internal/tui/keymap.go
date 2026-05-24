@@ -1,6 +1,59 @@
 package tui
 
-const browseKeyHelp = "j/k move  enter inspect  a capture  t tend  r rest  e evolve  A archive  x release  / search  f filter  ? help  q quit"
+type keyHint struct {
+	Key   string
+	Label string
+}
+
+var browseKeyHints = []keyHint{
+	{Key: "j/k", Label: "move"},
+	{Key: "enter", Label: "inspect"},
+	{Key: "a", Label: "capture"},
+	{Key: "t", Label: "tend"},
+	{Key: "r", Label: "rest"},
+	{Key: "e", Label: "evolve"},
+	{Key: "A", Label: "archive"},
+	{Key: "x", Label: "release"},
+	{Key: "/", Label: "search"},
+	{Key: "f", Label: "show"},
+	{Key: "?", Label: "help"},
+	{Key: "q", Label: "quit"},
+}
+
+var searchKeyHints = []keyHint{
+	{Key: "enter", Label: "apply"},
+	{Key: "ctrl+u", Label: "clear"},
+	{Key: "esc", Label: "cancel"},
+}
+
+var filterKeyHints = []keyHint{
+	{Key: "h/l", Label: "choose"},
+	{Key: "enter", Label: "apply"},
+	{Key: "esc", Label: "cancel"},
+}
+
+var captureKeyHints = []keyHint{
+	{Key: "ctrl+s", Label: "save"},
+	{Key: "esc", Label: "cancel"},
+}
+
+var tendKeyHints = []keyHint{
+	{Key: "tab", Label: "field"},
+	{Key: "ctrl+s", Label: "mark tended"},
+	{Key: "esc", Label: "cancel"},
+}
+
+var releaseKeyHints = []keyHint{
+	{Key: "y", Label: "confirm"},
+	{Key: "n", Label: "cancel"},
+	{Key: "esc", Label: "cancel"},
+}
+
+var helpKeyHints = []keyHint{
+	{Key: "esc", Label: "close"},
+	{Key: "?", Label: "close"},
+	{Key: "q", Label: "close"},
+}
 
 func keyHelpLines(mode Mode) []string {
 	return []string{
@@ -20,7 +73,7 @@ func keyHelpLines(mode Mode) []string {
 		"",
 		labelStyle.Render("Find"),
 		"/ search",
-		"f filter",
+		"f choose what is shown",
 		"R reload",
 		"",
 		labelStyle.Render("Leave"),
