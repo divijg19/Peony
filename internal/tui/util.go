@@ -107,6 +107,13 @@ func renderBox(style lipgloss.Style, width, height int, content string) string {
 	return style.Width(contentWidth).Height(contentHeight).Render(content)
 }
 
+func renderPromptBox(style lipgloss.Style, width, height int, content string) string {
+	contentWidth := maxInt(1, width-style.GetHorizontalFrameSize())
+	contentHeight := maxInt(1, height-style.GetVerticalFrameSize())
+	line := oneLine(content, maxInt(1, contentWidth-style.GetHorizontalFrameSize()))
+	return style.Width(contentWidth).Height(contentHeight).Render(line)
+}
+
 func renderRailRow(style lipgloss.Style, width int, content string) string {
 	contentWidth := maxInt(1, width-style.GetHorizontalFrameSize())
 	return style.Width(contentWidth).Render(oneLine(content, maxInt(1, contentWidth-2)))
