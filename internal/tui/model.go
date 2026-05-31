@@ -37,11 +37,10 @@ type FilterKind int
 const (
 	FilterReady FilterKind = iota
 	FilterResting
-	FilterMemory
 	FilterAll
 )
 
-var filterKinds = []FilterKind{FilterReady, FilterResting, FilterMemory, FilterAll}
+var filterKinds = []FilterKind{FilterReady, FilterResting, FilterAll}
 
 // Run opens Bloom, Peony's full-screen terminal space.
 func Run() int {
@@ -654,8 +653,6 @@ func (f FilterKind) label() string {
 		return "Ready"
 	case FilterResting:
 		return "Resting"
-	case FilterMemory:
-		return "Memory"
 	default:
 		return "All"
 	}
@@ -667,8 +664,6 @@ func (f FilterKind) appFilter() app.BloomFilterKind {
 		return app.BloomFilterReady
 	case FilterResting:
 		return app.BloomFilterResting
-	case FilterMemory:
-		return app.BloomFilterMemory
 	default:
 		return app.BloomFilterAll
 	}

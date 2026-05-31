@@ -158,12 +158,20 @@ func TestFocusedQueueFilteringSearchAndOrdering(t *testing.T) {
 		t.Fatalf("capture resting: %v", err)
 	}
 
-	memoryID, err := m.service.Capture("memory delta")
+	evolvedID, err := m.service.Capture("evolved delta")
 	if err != nil {
-		t.Fatalf("capture memory: %v", err)
+		t.Fatalf("capture evolved: %v", err)
 	}
-	if err := m.service.Evolve(memoryID); err != nil {
-		t.Fatalf("evolve memory: %v", err)
+	if err := m.service.Evolve(evolvedID); err != nil {
+		t.Fatalf("evolve: %v", err)
+	}
+
+	archivedID, err := m.service.Capture("archived epsilon")
+	if err != nil {
+		t.Fatalf("capture archived: %v", err)
+	}
+	if err := m.service.Archive(archivedID); err != nil {
+		t.Fatalf("archive: %v", err)
 	}
 
 	m.reloadPreserving(0)
@@ -182,12 +190,29 @@ func TestFocusedQueueFilteringSearchAndOrdering(t *testing.T) {
 		t.Fatalf("resting filter mismatch: filter=%v thoughts=%+v", m.filter, m.snapshot.Thoughts)
 	}
 	m = press(m, tea.KeyMsg{Type: tea.KeyRight})
-	if m.filter != FilterMemory || len(m.snapshot.Thoughts) != 1 || m.snapshot.Thoughts[0].Thought.ID != memoryID {
-		t.Fatalf("memory filter mismatch: filter=%v thoughts=%+v", m.filter, m.snapshot.Thoughts)
+	if m.filter != FilterAll || len(m.snapshot.Thoughts) != 4 {
+		t.Fatalf("all filter mismatch: filter=%v thoughts=%+v", m.filter, m.snapshot.Thoughts)
+	}
+	for _, item := range m.snapshot.Thoughts {
+		if item.Thought.ID == archivedID {
+			t.Fatalf("archived thought leaked into Bloom all filter: %+v", m.snapshot.Thoughts)
+		}
+	}
+	if strings.Contains(m.View(), "archived epsilon") {
+		t.Fatalf("archived thought rendered in Bloom all view: %q", m.View())
+	}
+	foundEvolved := false
+	for _, item := range m.snapshot.Thoughts {
+		if item.Thought.ID == evolvedID {
+			foundEvolved = true
+		}
+	}
+	if !foundEvolved {
+		t.Fatalf("evolved thought missing from Bloom all filter: %+v", m.snapshot.Thoughts)
 	}
 
 	m = press(m, runeKey('/'))
-	m.search.SetValue("gamma")
+	m.search.SetValue("archived")
 	m = press(m, tea.KeyMsg{Type: tea.KeyEnter})
 	if !strings.Contains(m.status, "No matching thought") {
 		t.Fatalf("search status = %q, want gentle empty", m.status)
@@ -209,10 +234,44 @@ func TestLayoutFitsWideMediumCompactAndSmall(t *testing.T) {
 		if strings.Contains(view, "Garden") || strings.Contains(view, "terminal garden") {
 			t.Fatalf("view should not include Garden copy: %q", view)
 		}
+		layout := sized(m, size.width, size.height).layout()
+		if layout.outputWidth != 0 {
+			t.Fatalf("output drawer should not appear at %dx%d, got width %d", size.width, size.height, layout.outputWidth)
+		}
+	}
+	wide := sized(m, 140, 36)
+	wideLayout := wide.layout()
+	if wideLayout.outputWidth == 0 {
+		t.Fatal("wide layout should reserve an output drawer")
+	}
+	if !strings.Contains(assertViewFits(t, m, 140, 36), "Output") {
+		t.Fatal("wide view should render the output drawer")
 	}
 	view := assertViewFits(t, m, 50, 14)
 	if !strings.Contains(view, "more room") {
 		t.Fatalf("small view missing minimum-size message: %q", view)
+	}
+}
+
+func TestPromptRowBoundedAndOnlyForPromptModes(t *testing.T) {
+	withSettleDuration(t, 0)
+	m := newTestModel(t)
+	if _, err := m.service.Capture("alpha"); err != nil {
+		t.Fatalf("capture: %v", err)
+	}
+	m.reloadPreserving(0)
+	m = sized(m, 120, 32)
+	if got := m.layout().promptHeight; got != 0 {
+		t.Fatalf("browse prompt height = %d, want 0", got)
+	}
+
+	m = press(m, runeKey('/'))
+	layout := m.layout()
+	if layout.promptHeight == 0 {
+		t.Fatal("search mode should reserve a prompt row")
+	}
+	if layout.promptHeight > layout.height/5 {
+		t.Fatalf("prompt height = %d, want <= 20%% of %d", layout.promptHeight, layout.height)
 	}
 }
 
@@ -256,12 +315,12 @@ func TestBottomRailModes(t *testing.T) {
 	browse := m.View()
 	for _, want := range []string{"Move gently", "a capture", "x release"} {
 		if !strings.Contains(browse, want) {
-			t.Fatalf("browse rail missing %q: %q", want, browse)
+			t.Fatalf("browse chrome missing %q: %q", want, browse)
 		}
 	}
 	lines := strings.Split(browse, "\n")
 	if !strings.Contains(lines[len(lines)-1], "q quit") {
-		t.Fatalf("keybinding row should sit on the bottom edge: %q", lines[len(lines)-1])
+		t.Fatalf("footer keybinding row should sit on the bottom edge: %q", lines[len(lines)-1])
 	}
 	if strings.Contains(browse, "filter") {
 		t.Fatalf("browse view should use showing/focus language, not filter copy: %q", browse)
@@ -276,8 +335,11 @@ func TestBottomRailModes(t *testing.T) {
 
 	m = press(m, runeKey('f'))
 	filter := m.View()
-	if !strings.Contains(filter, "Ready") || !strings.Contains(filter, "Memory") || !strings.Contains(filter, "h/l choose") {
+	if !strings.Contains(filter, "Ready") || !strings.Contains(filter, "Resting") || !strings.Contains(filter, "All") || !strings.Contains(filter, "h/l choose") {
 		t.Fatalf("filter rail incomplete: %q", filter)
+	}
+	if strings.Contains(filter, "Memory") {
+		t.Fatalf("filter view should not expose Memory: %q", filter)
 	}
 	m = press(m, tea.KeyMsg{Type: tea.KeyEsc})
 

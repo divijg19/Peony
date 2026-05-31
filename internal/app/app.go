@@ -71,7 +71,6 @@ type BloomFilterKind string
 const (
 	BloomFilterReady   BloomFilterKind = "ready"
 	BloomFilterResting BloomFilterKind = "resting"
-	BloomFilterMemory  BloomFilterKind = "memory"
 	BloomFilterAll     BloomFilterKind = "all"
 )
 
@@ -79,7 +78,6 @@ const (
 type BloomCounts struct {
 	Ready   int
 	Resting int
-	Memory  int
 	All     int
 }
 
@@ -213,7 +211,7 @@ func (s *Service) SnapshotBloom(filter BloomFilterKind, query string) (BloomSnap
 		filter = BloomFilterReady
 	}
 
-	all, err := s.loadAllThoughts()
+	all, err := s.loadBloomThoughts()
 	if err != nil {
 		return BloomSnapshot{}, err
 	}
@@ -229,9 +227,6 @@ func (s *Service) SnapshotBloom(filter BloomFilterKind, query string) (BloomSnap
 		if item.Ready {
 			readyCount++
 		}
-		if item.Thought.CurrentState == core.StateReleased {
-			continue
-		}
 		if query != "" && !matchesQuery(item, query) {
 			continue
 		}
@@ -242,8 +237,6 @@ func (s *Service) SnapshotBloom(filter BloomFilterKind, query string) (BloomSnap
 			counts.Ready++
 		case BloomFilterResting:
 			counts.Resting++
-		case BloomFilterMemory:
-			counts.Memory++
 		}
 		counts.All++
 
@@ -300,6 +293,28 @@ func (s *Service) loadAllThoughts() ([]GardenThought, error) {
 				return nil, fmt.Errorf("snapshot: get thought %d: %w", partial.ID, err)
 			}
 			items = append(items, GardenThought{Thought: thought, Events: events})
+		}
+		if len(pageThoughts) < pageSize {
+			break
+		}
+	}
+	return items, nil
+}
+
+func (s *Service) loadBloomThoughts() ([]BloomThought, error) {
+	const pageSize = 100
+	var items []BloomThought
+	for page := 0; ; page++ {
+		pageThoughts, err := s.store.ListBloomThoughtsByPagination(pageSize, page*pageSize)
+		if err != nil {
+			return nil, fmt.Errorf("snapshot: list bloom thoughts: %w", err)
+		}
+		for _, partial := range pageThoughts {
+			thought, events, err := s.store.GetThought(partial.ID)
+			if err != nil {
+				return nil, fmt.Errorf("snapshot: get thought %d: %w", partial.ID, err)
+			}
+			items = append(items, BloomThought{Thought: thought, Events: events})
 		}
 		if len(pageThoughts) < pageSize {
 			break
@@ -406,7 +421,7 @@ func bloomCategory(item BloomThought) BloomFilterKind {
 	case item.Thought.CurrentState == core.StateCaptured || item.Thought.CurrentState == core.StateResting:
 		return BloomFilterResting
 	default:
-		return BloomFilterMemory
+		return BloomFilterAll
 	}
 }
 

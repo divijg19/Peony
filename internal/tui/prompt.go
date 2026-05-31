@@ -7,14 +7,27 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-func (m Model) promptRailView(layout frameLayout) string {
-	prompt, hints := m.railContent(layout.contentWidth)
-	prompt = renderRailRow(railPromptStyle, layout.contentWidth, prompt)
-	keys := renderRailRow(railKeyStyle, layout.contentWidth, m.keyLegend(hints, layout.contentWidth-6))
-	return strings.Join([]string{prompt, keys}, "\n")
+func (m Model) hasPromptRow() bool {
+	switch m.mode {
+	case ModeSearch, ModeFilter, ModeReleaseConfirm, ModeCapture, ModeTend:
+		return true
+	default:
+		return false
+	}
 }
 
-func (m Model) railContent(width int) (string, []keyHint) {
+func (m Model) promptBoxView(layout frameLayout) string {
+	prompt, _ := m.promptContent(layout.contentWidth)
+	return renderPromptBox(promptBoxStyle, layout.contentWidth, layout.promptHeight, prompt)
+}
+
+func (m Model) footerView(layout frameLayout) string {
+	_, hints := m.promptContent(layout.contentWidth)
+	keys := m.keyLegend(hints, layout.contentWidth-footerStyle.GetHorizontalFrameSize())
+	return renderRailRow(footerStyle, layout.contentWidth, keys)
+}
+
+func (m Model) promptContent(width int) (string, []keyHint) {
 	switch m.mode {
 	case ModeSearch:
 		return m.searchPrompt(width), searchKeyHints
@@ -96,7 +109,7 @@ func (m Model) keyLegend(hints []keyHint, width int) string {
 	if len(hints) == 0 {
 		return ""
 	}
-	if len(hints) > 6 {
+	if len(hints) > 8 {
 		return m.plainKeyLegend(hints, width)
 	}
 	parts := make([]string, 0, len(hints))

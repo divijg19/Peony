@@ -405,6 +405,60 @@ func (s *Store) ListThoughtsByPagination(limit, offset int) ([]core.Thought, err
 	return thoughts, nil
 }
 
+// ListBloomThoughtsByPagination returns thoughts visible to the Bloom TUI.
+func (s *Store) ListBloomThoughtsByPagination(limit, offset int) ([]core.Thought, error) {
+	if s == nil {
+		return nil, fmt.Errorf("list bloom thoughts: store is nil")
+	}
+	if s.db == nil {
+		return nil, fmt.Errorf("list bloom thoughts: db is nil")
+	}
+	if limit <= 0 {
+		return nil, fmt.Errorf("list bloom thoughts: limit must be > 0")
+	}
+	if offset < 0 {
+		return nil, fmt.Errorf("list bloom thoughts: offset must be >= 0")
+	}
+
+	sqlList := `SELECT id, content, current_state, tend_counter, updated_at
+                FROM thoughts
+                WHERE current_state NOT IN (?, ?)
+                ORDER BY updated_at ASC, id ASC
+                LIMIT ? OFFSET ?`
+
+	rows, err := s.db.Query(sqlList, core.StateArchived, core.StateReleased, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("list bloom thoughts: query: %w", err)
+	}
+	defer rows.Close()
+
+	thoughts := make([]core.Thought, 0, limit)
+	for rows.Next() {
+		var thought core.Thought
+		var stateStr string
+		var updatedAtStr string
+
+		if err := rows.Scan(&thought.ID, &thought.Content, &stateStr, &thought.TendCounter, &updatedAtStr); err != nil {
+			return nil, fmt.Errorf("list bloom thoughts: scan: %w", err)
+		}
+
+		thought.CurrentState = core.State(stateStr)
+
+		thought.UpdatedAt, err = time.Parse(time.RFC3339Nano, updatedAtStr)
+		if err != nil {
+			return nil, fmt.Errorf("list bloom thoughts: parse updated_at: %w", err)
+		}
+
+		thoughts = append(thoughts, thought)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list bloom thoughts: rows: %w", err)
+	}
+
+	return thoughts, nil
+}
+
 // ListTendThoughtsByPagination returns a page of thoughts eligible for tending ordered by eligibility time and ID.
 func (s *Store) ListTendThoughtsByPagination(limit, offset int) ([]core.Thought, error) {
 	if s == nil {

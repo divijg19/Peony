@@ -12,13 +12,44 @@ import (
 )
 
 func (m Model) headerView(layout frameLayout) string {
-	line1 := alignRow(
+	return alignRow(
 		layout.contentWidth,
 		titleStyle.Render("Bloom")+"  "+subtleStyle.Render("a soft place for unfinished thoughts"),
 		metaStrongStyle.Render(fmt.Sprintf("Ready %d", m.snapshot.ReadyCount)),
 	)
-	line2 := subtleStyle.Render(m.showingLine(layout.contentWidth))
-	return strings.Join([]string{line1, line2}, "\n")
+}
+
+func (m Model) actionHeaderView(layout frameLayout) string {
+	return strings.Join([]string{
+		renderRailRow(actionStyle, layout.contentWidth, m.actionLine(layout.contentWidth)),
+		renderRailRow(actionMetaStyle, layout.contentWidth, m.showingLine(layout.contentWidth)),
+	}, "\n")
+}
+
+func (m Model) actionLine(width int) string {
+	status := strings.TrimSpace(m.status)
+	if status != "" {
+		return status
+	}
+	switch m.mode {
+	case ModeSearch:
+		return "Search the thoughts Bloom is allowed to show."
+	case ModeFilter:
+		return "Choose a visible scope: Ready, Resting, or All."
+	case ModeReleaseConfirm:
+		return "Confirm only when this thought can fully leave the local garden."
+	case ModeCapture:
+		return "Hold the thought in its original shape."
+	case ModeTend:
+		if m.tendFocus == 1 {
+			return "Add a note if one belongs with this tending."
+		}
+		return "Revise softly, then decide what comes next."
+	case ModeHelp:
+		return "Key guidance for this view."
+	default:
+		return oneLine(m.browsePrompt(), width)
+	}
 }
 
 func (m Model) showingLine(width int) string {
@@ -196,6 +227,43 @@ func (m Model) helpView(layout frameLayout) string {
 	return renderBox(sheetStyle, layout.bodyWidth, layout.bodyHeight, strings.Join(fitLines(lines, maxInt(3, layout.bodyHeight-sheetStyle.GetVerticalFrameSize())), "\n"))
 }
 
+func (m Model) outputDrawerView(width, height int) string {
+	innerWidth := maxInt(12, width-outputStyle.GetHorizontalFrameSize())
+	innerHeight := maxInt(3, height-outputStyle.GetVerticalFrameSize())
+	lines := []string{activeLabelStyle.Render("Output")}
+	lines = append(lines, m.outputLines(innerWidth)...)
+	return renderBox(outputStyle, width, height, strings.Join(fitLines(lines, innerHeight), "\n"))
+}
+
+func (m Model) outputLines(width int) []string {
+	lines := []string{}
+	if query := strings.TrimSpace(m.query); query != "" {
+		lines = append(lines, labelStyle.Render("Search"), oneLine(query, width))
+	}
+	if status := strings.TrimSpace(m.status); status != "" {
+		if len(lines) > 0 {
+			lines = append(lines, "")
+		}
+		lines = append(lines, labelStyle.Render("Status"))
+		lines = append(lines, wrapText(status, width, subtleStyle)...)
+	}
+	if m.mode == ModeFilter {
+		if len(lines) > 0 {
+			lines = append(lines, "")
+		}
+		lines = append(lines, labelStyle.Render("Scopes"))
+		lines = append(lines,
+			fmt.Sprintf("Ready    %d", m.snapshot.Counts.Ready),
+			fmt.Sprintf("Resting  %d", m.snapshot.Counts.Resting),
+			fmt.Sprintf("All      %d", m.snapshot.Counts.All),
+		)
+	}
+	if len(lines) == 0 {
+		lines = append(lines, subtleStyle.Render("Command and search output will settle here when it needs more room."))
+	}
+	return lines
+}
+
 func (m Model) emptyText() string {
 	if strings.TrimSpace(m.query) != "" {
 		return "No matching thought found. Nothing is wrong."
@@ -205,8 +273,6 @@ func (m Model) emptyText() string {
 		return "Nothing needs you right now."
 	case FilterResting:
 		return "Your thoughts are settling."
-	case FilterMemory:
-		return "Nothing has been placed in memory yet."
 	default:
 		return "Nothing is asking for your attention."
 	}

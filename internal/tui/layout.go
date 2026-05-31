@@ -18,26 +18,33 @@ type frameLayout struct {
 	contentWidth  int
 	contentHeight int
 	headerHeight  int
-	railHeight    int
+	actionHeight  int
+	promptHeight  int
+	footerHeight  int
 	bodyWidth     int
 	bodyHeight    int
+	mainWidth     int
 	queueWidth    int
 	queueHeight   int
 	detailWidth   int
 	detailHeight  int
+	outputWidth   int
+	outputHeight  int
 }
 
 const (
-	minWidth     = 56
-	minHeight    = 16
-	wideWidth    = 110
-	mediumWidth  = 80
-	rootPadX     = 0
-	rootPadY     = 0
-	headerHeight = 2
-	railHeight   = 2
-	bodyGap      = 0
-	paneGap      = 1
+	minWidth           = 56
+	minHeight          = 16
+	wideWidth          = 110
+	outputDrawerWidth  = 132
+	mediumWidth        = 80
+	rootPadX           = 0
+	rootPadY           = 0
+	nameHeaderHeight   = 1
+	actionHeaderHeight = 2
+	footerHeight       = 1
+	bodyGap            = 0
+	paneGap            = 1
 )
 
 func (m Model) layout() frameLayout {
@@ -54,26 +61,36 @@ func (m Model) layout() frameLayout {
 		height:        height,
 		contentWidth:  maxInt(1, width-rootPadX*2),
 		contentHeight: maxInt(1, height-rootPadY*2),
-		headerHeight:  headerHeight,
-		railHeight:    railHeight,
+		headerHeight:  nameHeaderHeight + actionHeaderHeight,
+		actionHeight:  actionHeaderHeight,
+		footerHeight:  footerHeight,
 	}
 	if width < minWidth || height < minHeight {
 		layout.kind = layoutSmall
 		return layout
 	}
+	if m.hasPromptRow() {
+		layout.promptHeight = minInt(3, maxInt(1, layout.contentHeight/5))
+	}
 	layout.bodyWidth = layout.contentWidth
-	layout.bodyHeight = maxInt(1, layout.contentHeight-layout.headerHeight-layout.railHeight)
+	layout.bodyHeight = maxInt(1, layout.contentHeight-layout.headerHeight-layout.promptHeight-layout.footerHeight)
+	layout.mainWidth = layout.bodyWidth
 
 	switch {
 	case width >= wideWidth:
 		layout.kind = layoutWide
-		queueWidth := layout.contentWidth * 44 / 100
+		if width >= outputDrawerWidth {
+			layout.outputWidth = minInt(34, maxInt(28, layout.contentWidth*22/100))
+			layout.outputHeight = layout.bodyHeight
+			layout.mainWidth = maxInt(40, layout.contentWidth-layout.outputWidth-paneGap)
+		}
+		queueWidth := layout.mainWidth * 44 / 100
 		queueWidth = minInt(60, maxInt(44, queueWidth))
-		maxQueue := layout.contentWidth * 50 / 100
+		maxQueue := layout.mainWidth * 50 / 100
 		if queueWidth > maxQueue {
 			queueWidth = maxQueue
 		}
-		available := layout.contentWidth - paneGap
+		available := layout.mainWidth - paneGap
 		layout.queueWidth = queueWidth
 		layout.detailWidth = maxInt(24, available-queueWidth)
 		layout.queueHeight = layout.bodyHeight
@@ -107,9 +124,14 @@ func (m Model) View() string {
 	}
 
 	header := m.headerView(layout)
-	rail := m.promptRailView(layout)
+	action := m.actionHeaderView(layout)
 	body := m.bodyView(layout)
-	content := lipgloss.JoinVertical(lipgloss.Left, header, body, rail)
+	parts := []string{header, action, body}
+	if layout.promptHeight > 0 {
+		parts = append(parts, m.promptBoxView(layout))
+	}
+	parts = append(parts, m.footerView(layout))
+	content := lipgloss.JoinVertical(lipgloss.Left, parts...)
 	content = lipgloss.Place(layout.contentWidth, layout.contentHeight, lipgloss.Left, lipgloss.Top, content)
 	return rootStyle.Width(layout.contentWidth).Height(layout.contentHeight).Render(content)
 }
@@ -142,11 +164,20 @@ func (m Model) browseView(layout frameLayout) string {
 			m.detailView(layout.detailWidth, layout.detailHeight),
 		)
 	}
-	return lipgloss.JoinHorizontal(
+	main := lipgloss.JoinHorizontal(
 		lipgloss.Top,
 		m.queueView(layout.queueWidth, layout.queueHeight),
 		stringsRepeat(" ", paneGap),
 		m.detailView(layout.detailWidth, layout.detailHeight),
+	)
+	if layout.outputWidth == 0 {
+		return main
+	}
+	return lipgloss.JoinHorizontal(
+		lipgloss.Top,
+		main,
+		stringsRepeat(" ", paneGap),
+		m.outputDrawerView(layout.outputWidth, layout.outputHeight),
 	)
 }
 

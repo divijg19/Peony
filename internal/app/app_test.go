@@ -112,11 +112,19 @@ func TestSnapshotBloomFocusedQueueFiltersAndCounts(t *testing.T) {
 		t.Fatalf("capture resting: %v", err)
 	}
 
-	memoryID, err := service.Capture("memory item")
+	evolvedID, err := service.Capture("evolved item")
 	if err != nil {
-		t.Fatalf("capture memory: %v", err)
+		t.Fatalf("capture evolved: %v", err)
 	}
-	if err := service.Archive(memoryID); err != nil {
+	if err := service.Evolve(evolvedID); err != nil {
+		t.Fatalf("evolve: %v", err)
+	}
+
+	archivedID, err := service.Capture("archived item")
+	if err != nil {
+		t.Fatalf("capture archived: %v", err)
+	}
+	if err := service.Archive(archivedID); err != nil {
 		t.Fatalf("archive: %v", err)
 	}
 
@@ -124,8 +132,8 @@ func TestSnapshotBloomFocusedQueueFiltersAndCounts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("snapshot ready: %v", err)
 	}
-	if snapshot.Counts.Ready != 2 || snapshot.Counts.Resting != 1 || snapshot.Counts.Memory != 1 || snapshot.Counts.All != 4 {
-		t.Fatalf("counts = %+v, want ready/resting/memory/all 2/1/1/4", snapshot.Counts)
+	if snapshot.Counts.Ready != 2 || snapshot.Counts.Resting != 1 || snapshot.Counts.All != 4 {
+		t.Fatalf("counts = %+v, want ready/resting/all 2/1/4", snapshot.Counts)
 	}
 	if len(snapshot.Thoughts) != 2 || snapshot.Thoughts[0].Thought.ID != readyID || snapshot.Thoughts[1].Thought.ID != tendedID {
 		t.Fatalf("ready queue = %+v, want ready then tended", snapshot.Thoughts)
@@ -139,12 +147,20 @@ func TestSnapshotBloomFocusedQueueFiltersAndCounts(t *testing.T) {
 		t.Fatalf("resting queue = %+v", snapshot.Thoughts)
 	}
 
-	snapshot, err = service.SnapshotBloom(BloomFilterMemory, "memory")
+	snapshot, err = service.SnapshotBloom(BloomFilterAll, "evolved")
 	if err != nil {
-		t.Fatalf("snapshot memory search: %v", err)
+		t.Fatalf("snapshot all evolved search: %v", err)
 	}
-	if len(snapshot.Thoughts) != 1 || snapshot.Thoughts[0].Thought.ID != memoryID {
-		t.Fatalf("memory search = %+v", snapshot.Thoughts)
+	if len(snapshot.Thoughts) != 1 || snapshot.Thoughts[0].Thought.ID != evolvedID {
+		t.Fatalf("evolved search = %+v", snapshot.Thoughts)
+	}
+
+	snapshot, err = service.SnapshotBloom(BloomFilterAll, "archived")
+	if err != nil {
+		t.Fatalf("snapshot all archived search: %v", err)
+	}
+	if len(snapshot.Thoughts) != 0 {
+		t.Fatalf("archived thoughts should be hidden from Bloom search, got %+v", snapshot.Thoughts)
 	}
 }
 

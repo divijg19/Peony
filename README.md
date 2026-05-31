@@ -168,7 +168,7 @@ peony tui
 bloom  # only if installed with --alias
 ```
 
-Bloom opens to a calm TUI with three zones: Ready, Resting, and Memory. It keeps a detail pane close by for content, state, readiness, timestamps, and event history. From there you can capture, tend, rest, evolve, archive, search, filter, reload, and permanently release thoughts without leaving the terminal.
+Bloom opens to a calm TUI with focused scopes for Ready, Resting, and All visible thoughts. Archived thoughts stay out of Bloom and remain viewable through the CLI. Bloom keeps a detail pane close by for content, state, readiness, timestamps, and event history. From there you can capture, tend, rest, evolve, archive, search, filter, reload, and permanently release thoughts without leaving the terminal.
 
 ---
 
