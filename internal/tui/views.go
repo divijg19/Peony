@@ -12,44 +12,11 @@ import (
 )
 
 func (m Model) headerView(layout frameLayout) string {
-	return alignRow(
+	return exactWidth(alignRow(
 		layout.contentWidth,
 		titleStyle.Render("Bloom")+"  "+subtleStyle.Render("a soft place for unfinished thoughts"),
 		metaStrongStyle.Render(fmt.Sprintf("Ready %d", m.snapshot.ReadyCount)),
-	)
-}
-
-func (m Model) actionHeaderView(layout frameLayout) string {
-	return strings.Join([]string{
-		renderRailRow(actionStyle, layout.contentWidth, m.actionLine(layout.contentWidth)),
-		renderRailRow(actionMetaStyle, layout.contentWidth, m.showingLine(layout.contentWidth)),
-	}, "\n")
-}
-
-func (m Model) actionLine(width int) string {
-	status := strings.TrimSpace(m.status)
-	if status != "" {
-		return status
-	}
-	switch m.mode {
-	case ModeSearch:
-		return "Search the thoughts Bloom is allowed to show."
-	case ModeFilter:
-		return "Choose a visible scope: Ready, Resting, or All."
-	case ModeReleaseConfirm:
-		return "Confirm only when this thought can fully leave the local garden."
-	case ModeCapture:
-		return "Hold the thought in its original shape."
-	case ModeTend:
-		if m.tendFocus == 1 {
-			return "Add a note if one belongs with this tending."
-		}
-		return "Revise softly, then decide what comes next."
-	case ModeHelp:
-		return "Key guidance for this view."
-	default:
-		return oneLine(m.browsePrompt(), width)
-	}
+	), layout.contentWidth)
 }
 
 func (m Model) showingLine(width int) string {
@@ -83,7 +50,7 @@ func (m Model) queueView(width, height int) string {
 func (m Model) queueTitle(width int) string {
 	count := len(m.snapshot.Thoughts)
 	label := fmt.Sprintf("Queue  %s", countStyle.Render(fmt.Sprintf("%d", count)))
-	if m.focus == FocusQueue && (m.mode == ModeBrowse || m.mode == ModeReleaseConfirm || m.mode == ModeSearch || m.mode == ModeFilter) {
+	if m.focus == FocusQueue && (m.mode == ModeBrowse || m.mode == ModeReleaseConfirm || m.mode == ModeSearch || m.mode == ModeCommand || m.mode == ModeFilter) {
 		label = activeLabelStyle.Render("Queue") + " " + countStyle.Render(fmt.Sprintf("%d", count))
 	}
 	return oneLine(label, width)
@@ -227,39 +194,55 @@ func (m Model) helpView(layout frameLayout) string {
 	return renderBox(sheetStyle, layout.bodyWidth, layout.bodyHeight, strings.Join(fitLines(lines, maxInt(3, layout.bodyHeight-sheetStyle.GetVerticalFrameSize())), "\n"))
 }
 
-func (m Model) outputDrawerView(width, height int) string {
+func (m Model) contextOutputView(width, height, promptHeight int) string {
 	innerWidth := maxInt(12, width-outputStyle.GetHorizontalFrameSize())
 	innerHeight := maxInt(3, height-outputStyle.GetVerticalFrameSize())
+	promptLines := maxInt(1, promptHeight-promptBarStyle.GetVerticalFrameSize())
 	lines := []string{activeLabelStyle.Render("Output")}
-	lines = append(lines, m.outputLines(innerWidth)...)
-	return renderBox(outputStyle, width, height, strings.Join(fitLines(lines, innerHeight), "\n"))
+	lines = append(lines, m.contextOutputLines(innerWidth, promptLines)...)
+	return exactWidth(renderBox(outputStyle, width, height, strings.Join(fitLines(lines, innerHeight), "\n")), width)
 }
 
-func (m Model) outputLines(width int) []string {
+func (m Model) contextOutputLines(width, promptLines int) []string {
 	lines := []string{}
 	if query := strings.TrimSpace(m.query); query != "" {
-		lines = append(lines, labelStyle.Render("Search"), oneLine(query, width))
+		wrapped := wrapText(query, width, subtleStyle)
+		if len(wrapped) > promptLines {
+			lines = append(lines, labelStyle.Render("Search"))
+			lines = append(lines, wrapped...)
+		}
 	}
 	if status := strings.TrimSpace(m.status); status != "" {
-		if len(lines) > 0 {
-			lines = append(lines, "")
+		wrapped := wrapText(status, width, subtleStyle)
+		if len(wrapped) > promptLines {
+			if len(lines) > 0 {
+				lines = append(lines, "")
+			}
+			lines = append(lines, labelStyle.Render("Status"))
+			lines = append(lines, wrapped...)
 		}
-		lines = append(lines, labelStyle.Render("Status"))
-		lines = append(lines, wrapText(status, width, subtleStyle)...)
 	}
-	if m.mode == ModeFilter {
-		if len(lines) > 0 {
-			lines = append(lines, "")
+	if len(m.commandOutput) > 0 {
+		wrapped := wrapText(strings.Join(m.commandOutput, "\n"), width, subtleStyle)
+		if len(wrapped) > promptLines {
+			if len(lines) > 0 {
+				lines = append(lines, "")
+			}
+			lines = append(lines, labelStyle.Render("Command output"))
+			lines = append(lines, wrapped...)
 		}
-		lines = append(lines, labelStyle.Render("Scopes"))
-		lines = append(lines,
-			fmt.Sprintf("Ready    %d", m.snapshot.Counts.Ready),
-			fmt.Sprintf("Resting  %d", m.snapshot.Counts.Resting),
-			fmt.Sprintf("All      %d", m.snapshot.Counts.All),
-		)
 	}
-	if len(lines) == 0 {
-		lines = append(lines, subtleStyle.Render("Command and search output will settle here when it needs more room."))
+	if m.mode == ModeCommand {
+		if value := strings.TrimSpace(m.command.Value()); value != "" {
+			wrapped := wrapText(value, width, subtleStyle)
+			if len(wrapped) > promptLines {
+				if len(lines) > 0 {
+					lines = append(lines, "")
+				}
+				lines = append(lines, labelStyle.Render("Command"))
+				lines = append(lines, wrapped...)
+			}
+		}
 	}
 	return lines
 }
