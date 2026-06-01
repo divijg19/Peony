@@ -19,6 +19,7 @@ const (
 	ModeCapture
 	ModeTend
 	ModeSearch
+	ModeCommand
 	ModeFilter
 	ModeHelp
 	ModeReleaseConfirm
@@ -86,6 +87,11 @@ func NewModel(service *app.Service) Model {
 	m.search.CharLimit = 120
 	m.search.Width = 44
 
+	m.command = textinput.New()
+	m.command.Placeholder = "type a Bloom command"
+	m.command.CharLimit = 120
+	m.command.Width = 44
+
 	m.reloadPreserving(0)
 	m.ensureUsableSelection()
 	return m
@@ -100,10 +106,12 @@ type Model struct {
 	height int
 	focus  PaneFocus
 
-	filter      FilterKind
-	filterIndex int
-	query       string
-	status      string
+	filter           FilterKind
+	filterIndex      int
+	query            string
+	status           string
+	commandOutput    []string
+	pendingReleaseID int64
 
 	selected     int
 	queueOffset  int
@@ -115,7 +123,9 @@ type Model struct {
 	tendContent textarea.Model
 	tendNote    textarea.Model
 	tendFocus   int
+	tendID      int64
 	search      textinput.Model
+	command     textinput.Model
 }
 
 // Init implements tea.Model.
@@ -138,6 +148,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateCapture(msg)
 		case ModeSearch:
 			return m.updateSearch(msg)
+		case ModeCommand:
+			return m.updateCommand(msg)
 		case ModeTend:
 			return m.updateTend(msg)
 		case ModeFilter:
@@ -214,6 +226,12 @@ func (m Model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.focus = FocusPrompt
 		m.search.SetValue(m.query)
 		m.search.Focus()
+		m.status = ""
+	case ":":
+		m.mode = ModeCommand
+		m.focus = FocusPrompt
+		m.command.SetValue("")
+		m.command.Focus()
 		m.status = ""
 	case "f":
 		m.mode = ModeFilter
@@ -296,6 +314,34 @@ func (m Model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+func (m Model) updateCommand(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.mode = ModeBrowse
+		m.focus = FocusQueue
+		m.command.Blur()
+		m.status = "Command cancelled."
+		return m, nil
+	case "enter":
+		value := strings.TrimSpace(m.command.Value())
+		m.command.Blur()
+		if value == "" {
+			m.mode = ModeBrowse
+			m.focus = FocusQueue
+			m.status = "Command is empty."
+		} else {
+			m.runCommand(value)
+		}
+		return m, nil
+	case "ctrl+u":
+		m.command.SetValue("")
+	}
+
+	var cmd tea.Cmd
+	m.command, cmd = m.command.Update(msg)
+	return m, cmd
+}
+
 func (m Model) updateFilter(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
@@ -341,8 +387,11 @@ func (m Model) updateTend(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.focusTendInput()
 		return m, nil
 	case "ctrl+s":
-		item, ok := m.selectedItem()
-		if !ok {
+		id := m.tendID
+		if id == 0 {
+			id = m.selectedID()
+		}
+		if id == 0 {
 			m.mode = ModeBrowse
 			m.focus = FocusQueue
 			return m, nil
@@ -352,15 +401,16 @@ func (m Model) updateTend(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if noteValue != "" {
 			note = &noteValue
 		}
-		if err := m.service.Tend(item.Thought.ID, m.tendContent.Value(), note); err != nil {
+		if err := m.service.Tend(id, m.tendContent.Value(), note); err != nil {
 			m.status = err.Error()
 			return m, nil
 		}
 		m.mode = ModeBrowse
 		m.focus = FocusQueue
+		m.tendID = 0
 		m.tendContent.Blur()
 		m.tendNote.Blur()
-		m.reloadPreserving(item.Thought.ID)
+		m.reloadPreserving(id)
 		m.status = "Choose rest, evolve, archive, or release when it feels resolved."
 		return m, nil
 	}
@@ -377,7 +427,7 @@ func (m Model) updateTend(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m Model) updateReleaseConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "y", "Y":
-		id := m.selectedID()
+		id := m.releaseTargetID()
 		if id == 0 {
 			m.mode = ModeBrowse
 			m.focus = FocusQueue
@@ -392,12 +442,14 @@ func (m Model) updateReleaseConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.mode = ModeBrowse
 		m.focus = FocusQueue
+		m.pendingReleaseID = 0
 		m.reloadPreserving(0)
 		m.selectIndex(oldIndex)
 		m.status = fmt.Sprintf("Released #%d permanently.", id)
 	case "n", "N", "esc":
 		m.mode = ModeBrowse
 		m.focus = FocusQueue
+		m.pendingReleaseID = 0
 		m.status = "Release cancelled."
 	}
 	return m, nil
@@ -415,6 +467,7 @@ func (m *Model) startTend() {
 	}
 	m.mode = ModeTend
 	m.focus = FocusPrompt
+	m.tendID = item.Thought.ID
 	m.tendFocus = 0
 	m.tendContent.SetValue(item.Thought.Content)
 	m.tendNote.Reset()
@@ -619,6 +672,7 @@ func (m *Model) resizeInputs() {
 	m.tendContent.SetWidth(inputWidth)
 	m.tendNote.SetWidth(inputWidth)
 	m.search.Width = minInt(maxInt(24, layout.contentWidth-16), 72)
+	m.command.Width = minInt(maxInt(24, layout.contentWidth-16), 72)
 
 	editorHeight := maxInt(6, minInt(12, layout.bodyHeight/2))
 	noteHeight := maxInt(4, minInt(7, layout.bodyHeight/4))
@@ -645,6 +699,13 @@ func (m Model) selectedID() int64 {
 		return 0
 	}
 	return item.Thought.ID
+}
+
+func (m Model) releaseTargetID() int64 {
+	if m.pendingReleaseID != 0 {
+		return m.pendingReleaseID
+	}
+	return m.selectedID()
 }
 
 func (f FilterKind) label() string {

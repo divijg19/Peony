@@ -54,6 +54,12 @@ func sized(m Model, width, height int) Model {
 	return next.(Model)
 }
 
+func runCommand(m Model, value string) Model {
+	m = press(m, runeKey(':'))
+	m.command.SetValue(value)
+	return press(m, tea.KeyMsg{Type: tea.KeyEnter})
+}
+
 func assertViewFits(t *testing.T, m Model, width, height int) string {
 	t.Helper()
 	m = sized(m, width, height)
@@ -68,6 +74,15 @@ func assertViewFits(t *testing.T, m Model, width, height int) string {
 		t.Fatalf("view height = %d, want <= %d\n%s", got, height, view)
 	}
 	return view
+}
+
+func assertEveryLineWidth(t *testing.T, view string, width int) {
+	t.Helper()
+	for i, line := range strings.Split(view, "\n") {
+		if got := lipgloss.Width(line); got != width {
+			t.Fatalf("line %d width = %d, want %d: %q\n%s", i+1, got, width, line, view)
+		}
+	}
 }
 
 func TestModelCaptureSaveCancelAndEmptyValidation(t *testing.T) {
@@ -235,17 +250,17 @@ func TestLayoutFitsWideMediumCompactAndSmall(t *testing.T) {
 			t.Fatalf("view should not include Garden copy: %q", view)
 		}
 		layout := sized(m, size.width, size.height).layout()
-		if layout.outputWidth != 0 {
-			t.Fatalf("output drawer should not appear at %dx%d, got width %d", size.width, size.height, layout.outputWidth)
+		if layout.contextWidth != 0 {
+			t.Fatalf("context output should not appear at %dx%d, got width %d", size.width, size.height, layout.contextWidth)
 		}
 	}
 	wide := sized(m, 140, 36)
 	wideLayout := wide.layout()
-	if wideLayout.outputWidth == 0 {
-		t.Fatal("wide layout should reserve an output drawer")
+	if wideLayout.contextWidth != 0 {
+		t.Fatalf("idle wide layout should stay two-column, got context width %d", wideLayout.contextWidth)
 	}
-	if !strings.Contains(assertViewFits(t, m, 140, 36), "Output") {
-		t.Fatal("wide view should render the output drawer")
+	if strings.Contains(assertViewFits(t, m, 140, 36), "Output") {
+		t.Fatal("idle wide view should not render contextual output")
 	}
 	view := assertViewFits(t, m, 50, 14)
 	if !strings.Contains(view, "more room") {
@@ -253,7 +268,7 @@ func TestLayoutFitsWideMediumCompactAndSmall(t *testing.T) {
 	}
 }
 
-func TestPromptRowBoundedAndOnlyForPromptModes(t *testing.T) {
+func TestPromptBarAlwaysPresentAndBounded(t *testing.T) {
 	withSettleDuration(t, 0)
 	m := newTestModel(t)
 	if _, err := m.service.Capture("alpha"); err != nil {
@@ -261,17 +276,152 @@ func TestPromptRowBoundedAndOnlyForPromptModes(t *testing.T) {
 	}
 	m.reloadPreserving(0)
 	m = sized(m, 120, 32)
-	if got := m.layout().promptHeight; got != 0 {
-		t.Fatalf("browse prompt height = %d, want 0", got)
+	if got := m.layout().promptHeight; got != 5 {
+		t.Fatalf("browse prompt height = %d, want 5", got)
+	}
+	if !strings.Contains(m.View(), "Bloom prompt") || !strings.Contains(m.View(), "/ search") || !strings.Contains(m.View(), ": command") {
+		t.Fatalf("browse prompt bar missing launcher text: %q", m.View())
 	}
 
 	m = press(m, runeKey('/'))
 	layout := m.layout()
-	if layout.promptHeight == 0 {
-		t.Fatal("search mode should reserve a prompt row")
+	if layout.promptHeight < 3 {
+		t.Fatalf("search prompt height = %d, want at least 3", layout.promptHeight)
 	}
 	if layout.promptHeight > layout.height/5 {
 		t.Fatalf("prompt height = %d, want <= 20%% of %d", layout.promptHeight, layout.height)
+	}
+
+	for _, key := range []tea.KeyMsg{runeKey(':'), runeKey('f'), runeKey('x')} {
+		m = sized(newTestModel(t), 120, 32)
+		if _, err := m.service.Capture("alpha"); err != nil {
+			t.Fatalf("capture: %v", err)
+		}
+		m.reloadPreserving(0)
+		m = press(m, key)
+		if got := m.layout().promptHeight; got < 3 || got > m.layout().height/5 {
+			t.Fatalf("prompt height for key %q = %d", key.String(), got)
+		}
+	}
+}
+
+func TestCommandBarRunsReadableCommands(t *testing.T) {
+	withSettleDuration(t, 0)
+	m := newTestModel(t)
+	id, err := m.service.Capture("visible alpha")
+	if err != nil {
+		t.Fatalf("capture visible: %v", err)
+	}
+	archivedID, err := m.service.Capture("archived omega")
+	if err != nil {
+		t.Fatalf("capture archived: %v", err)
+	}
+	if err := m.service.Archive(archivedID); err != nil {
+		t.Fatalf("archive: %v", err)
+	}
+	m.reloadPreserving(id)
+
+	for _, tc := range []struct {
+		command string
+		want    string
+	}{
+		{"help", "Peony commands"},
+		{"help view", "peony view"},
+		{"view", "Visible thoughts"},
+		{fmt.Sprintf("view %d", id), "CONTENT"},
+		{"view archived", "archived omega"},
+		{"tend", "Ready to tend"},
+		{"version", "Peony v0.4"},
+		{"config", "Current configuration"},
+		{"later", "Unknown command"},
+		{"tui", "Bloom is already open"},
+	} {
+		m = runCommand(m, tc.command)
+		if !strings.Contains(strings.Join(m.commandOutput, "\n"), tc.want) {
+			t.Fatalf("command %q output = %+v, want %q", tc.command, m.commandOutput, tc.want)
+		}
+	}
+}
+
+func TestCommandBarRunsMutatingAndTUIScreenCommands(t *testing.T) {
+	withSettleDuration(t, 0)
+	m := newTestModel(t)
+
+	m = runCommand(m, "add")
+	if m.mode != ModeCapture {
+		t.Fatalf("bare add mode = %v, want capture", m.mode)
+	}
+	m = press(m, tea.KeyMsg{Type: tea.KeyEsc})
+
+	m = runCommand(m, "add command-born thought")
+	if len(m.snapshot.Thoughts) != 1 || m.snapshot.Thoughts[0].Thought.Content != "command-born thought" {
+		t.Fatalf("add command snapshot = %+v", m.snapshot.Thoughts)
+	}
+	id := m.snapshot.Thoughts[0].Thought.ID
+
+	m = runCommand(m, fmt.Sprintf("tend %d", id))
+	if m.mode != ModeTend || m.tendID != id {
+		t.Fatalf("tend command mode=%v tendID=%d want mode tend id %d", m.mode, m.tendID, id)
+	}
+	m = press(m, tea.KeyMsg{Type: tea.KeyEsc})
+
+	m = runCommand(m, fmt.Sprintf("evolve %d", id))
+	if !strings.Contains(strings.Join(m.commandOutput, "\n"), fmt.Sprintf("Evolved #%d", id)) {
+		t.Fatalf("evolve output = %+v", m.commandOutput)
+	}
+
+	secondID, err := m.service.Capture("release candidate")
+	if err != nil {
+		t.Fatalf("capture release candidate: %v", err)
+	}
+	m.reloadPreserving(secondID)
+	m = runCommand(m, fmt.Sprintf("release %d", secondID))
+	if m.mode != ModeReleaseConfirm || m.pendingReleaseID != secondID {
+		t.Fatalf("release command mode=%v pending=%d want confirm %d", m.mode, m.pendingReleaseID, secondID)
+	}
+	if _, err := m.service.Thought(secondID); err != nil {
+		t.Fatalf("release command should not delete before confirmation: %v", err)
+	}
+}
+
+func TestContextOutputOnlyForWideOverflow(t *testing.T) {
+	withSettleDuration(t, 0)
+	m := newTestModel(t)
+	if _, err := m.service.Capture("alpha"); err != nil {
+		t.Fatalf("capture: %v", err)
+	}
+	m.reloadPreserving(0)
+
+	m = sized(m, 140, 36)
+	if got := m.layout().contextWidth; got != 0 {
+		t.Fatalf("idle context width = %d, want 0", got)
+	}
+
+	m.status = strings.Repeat("long command feedback ", 12)
+	if got := m.layout().contextWidth; got == 0 {
+		t.Fatal("wide overflow should reserve contextual output")
+	}
+	if !strings.Contains(m.View(), "Output") {
+		t.Fatalf("wide overflow view should render contextual output: %q", m.View())
+	}
+
+	m = sized(m, 100, 30)
+	if got := m.layout().contextWidth; got != 0 {
+		t.Fatalf("medium overflow context width = %d, want collapsed output", got)
+	}
+}
+
+func TestChromeRowsFillEveryWindowLine(t *testing.T) {
+	withSettleDuration(t, 0)
+	m := newTestModel(t)
+	if _, err := m.service.Capture("alpha"); err != nil {
+		t.Fatalf("capture: %v", err)
+	}
+	m.reloadPreserving(0)
+
+	for _, size := range []struct{ width, height int }{{120, 32}, {100, 30}, {76, 24}, {140, 36}} {
+		view := assertViewFits(t, m, size.width, size.height)
+		assertEveryLineWidth(t, view, size.width)
 	}
 }
 
@@ -322,8 +472,9 @@ func TestBottomRailModes(t *testing.T) {
 	if !strings.Contains(lines[len(lines)-1], "q quit") {
 		t.Fatalf("footer keybinding row should sit on the bottom edge: %q", lines[len(lines)-1])
 	}
-	if strings.Contains(browse, "filter") {
-		t.Fatalf("browse view should use showing/focus language, not filter copy: %q", browse)
+	lines = strings.Split(browse, "\n")
+	if strings.Contains(lines[1], "Move gently") || strings.Contains(lines[1], "Showing Ready") {
+		t.Fatalf("top action/status bar should be gone: %q", lines[1])
 	}
 
 	m = press(m, runeKey('/'))
@@ -332,6 +483,20 @@ func TestBottomRailModes(t *testing.T) {
 		t.Fatalf("search rail incomplete: %q", search)
 	}
 	m = press(m, tea.KeyMsg{Type: tea.KeyEsc})
+
+	m = press(m, runeKey(':'))
+	if m.mode != ModeCommand {
+		t.Fatalf("mode = %v, want command", m.mode)
+	}
+	command := m.View()
+	if !strings.Contains(command, "Command") || !strings.Contains(command, "enter run") {
+		t.Fatalf("command prompt incomplete: %q", command)
+	}
+	m.command.SetValue("help")
+	m = press(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.mode != ModeBrowse || !strings.Contains(m.status, "Help opened") {
+		t.Fatalf("command validation result: mode=%v status=%q", m.mode, m.status)
+	}
 
 	m = press(m, runeKey('f'))
 	filter := m.View()

@@ -258,6 +258,33 @@ func (s *Service) SnapshotBloom(filter BloomFilterKind, query string) (BloomSnap
 	}, nil
 }
 
+// Thought returns one thought with its event history.
+func (s *Service) Thought(id int64) (BloomThought, error) {
+	if s == nil || s.store == nil {
+		return BloomThought{}, fmt.Errorf("thought: service is nil")
+	}
+	thought, events, err := s.store.GetThought(id)
+	if err != nil {
+		return BloomThought{}, err
+	}
+	return BloomThought{
+		Thought: thought,
+		Events:  events,
+		Ready:   core.EligibleToSurface(thought, time.Now().UTC()),
+	}, nil
+}
+
+// TendReady returns thoughts eligible for tending.
+func (s *Service) TendReady(limit int) ([]core.Thought, error) {
+	if s == nil || s.store == nil {
+		return nil, fmt.Errorf("tend ready: service is nil")
+	}
+	if limit <= 0 {
+		limit = 10
+	}
+	return s.store.ListTendThoughtsByPagination(limit, 0)
+}
+
 func buildZones(thoughts []GardenThought) []GardenZone {
 	zones := []GardenZone{
 		{Kind: ZoneReady, Title: "Ready", Empty: "Nothing needs you right now."},

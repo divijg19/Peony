@@ -107,16 +107,17 @@ func renderBox(style lipgloss.Style, width, height int, content string) string {
 	return style.Width(contentWidth).Height(contentHeight).Render(content)
 }
 
-func renderPromptBox(style lipgloss.Style, width, height int, content string) string {
+func renderPromptBar(style lipgloss.Style, width, height int, content string) string {
 	contentWidth := maxInt(1, width-style.GetHorizontalFrameSize())
 	contentHeight := maxInt(1, height-style.GetVerticalFrameSize())
-	line := oneLine(content, maxInt(1, contentWidth-style.GetHorizontalFrameSize()))
-	return style.Width(contentWidth).Height(contentHeight).Render(line)
+	lines := strings.Split(content, "\n")
+	lines = fitLines(widthLines(lines, maxInt(1, contentWidth-style.GetHorizontalFrameSize())), contentHeight)
+	return exactWidth(style.Width(contentWidth).Height(contentHeight).Render(strings.Join(lines, "\n")), width)
 }
 
 func renderRailRow(style lipgloss.Style, width int, content string) string {
 	contentWidth := maxInt(1, width-style.GetHorizontalFrameSize())
-	return style.Width(contentWidth).Render(oneLine(content, maxInt(1, contentWidth-2)))
+	return exactWidth(style.Width(contentWidth).Render(oneLine(content, maxInt(1, contentWidth-2))), width)
 }
 
 func alignRow(width int, left string, right string) string {
@@ -137,4 +138,17 @@ func alignRow(width int, left string, right string) string {
 		gap = 1
 	}
 	return left + stringsRepeat(" ", gap) + right
+}
+
+func exactWidth(rendered string, width int) string {
+	if width <= 0 {
+		return rendered
+	}
+	lines := strings.Split(rendered, "\n")
+	for i, line := range lines {
+		if gap := width - lipgloss.Width(line); gap > 0 {
+			lines[i] = line + stringsRepeat(" ", gap)
+		}
+	}
+	return strings.Join(lines, "\n")
 }

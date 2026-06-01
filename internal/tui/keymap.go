@@ -9,6 +9,7 @@ var browseKeyHints = []keyHint{
 	{Key: "j/k", Label: "move"},
 	{Key: "enter", Label: "inspect"},
 	{Key: "/", Label: "search"},
+	{Key: ":", Label: "command"},
 	{Key: "a", Label: "capture"},
 	{Key: "t", Label: "tend"},
 	{Key: "r/e/A", Label: "resolve"},
@@ -20,6 +21,12 @@ var browseKeyHints = []keyHint{
 
 var searchKeyHints = []keyHint{
 	{Key: "enter", Label: "apply"},
+	{Key: "ctrl+u", Label: "clear"},
+	{Key: "esc", Label: "cancel"},
+}
+
+var commandKeyHints = []keyHint{
+	{Key: "enter", Label: "run"},
 	{Key: "ctrl+u", Label: "clear"},
 	{Key: "esc", Label: "cancel"},
 }
@@ -71,6 +78,7 @@ func keyHelpLines(mode Mode) []string {
 		"",
 		labelStyle.Render("Find"),
 		"/ search",
+		": command prompt",
 		"f choose what is shown",
 		"R reload",
 		"",
