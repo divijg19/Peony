@@ -1,6 +1,10 @@
 package tui
 
-import "github.com/charmbracelet/lipgloss"
+import (
+	"strings"
+
+	"github.com/charmbracelet/lipgloss"
+)
 
 type layoutKind int
 
@@ -152,23 +156,30 @@ func (m Model) bodyView(layout frameLayout) string {
 
 func (m Model) browseView(layout frameLayout) string {
 	if layout.kind == layoutCompact {
+		if m.outputPanelOpen() {
+			return m.outputView(layout.bodyWidth, layout.bodyHeight)
+		}
 		if m.focus == FocusDetail {
 			return m.detailView(layout.detailWidth, layout.detailHeight)
 		}
 		return m.queueView(layout.queueWidth, layout.queueHeight)
 	}
 	if layout.kind == layoutMedium {
+		detail := m.detailView(layout.detailWidth, layout.detailHeight)
+		if m.outputPanelOpen() {
+			detail = m.outputView(layout.detailWidth, layout.detailHeight)
+		}
 		return lipgloss.JoinVertical(
 			lipgloss.Left,
 			m.queueView(layout.queueWidth, layout.queueHeight),
-			stringsRepeat(" ", paneGap),
-			m.detailView(layout.detailWidth, layout.detailHeight),
+			strings.Repeat(" ", paneGap),
+			detail,
 		)
 	}
 	main := lipgloss.JoinHorizontal(
 		lipgloss.Top,
 		m.queueView(layout.queueWidth, layout.queueHeight),
-		stringsRepeat(" ", paneGap),
+		strings.Repeat(" ", paneGap),
 		m.detailView(layout.detailWidth, layout.detailHeight),
 	)
 	if layout.contextWidth == 0 {
@@ -177,8 +188,8 @@ func (m Model) browseView(layout frameLayout) string {
 	return lipgloss.JoinHorizontal(
 		lipgloss.Top,
 		main,
-		stringsRepeat(" ", paneGap),
-		m.contextOutputView(layout.contextWidth, layout.contextHeight, layout.promptHeight),
+		strings.Repeat(" ", paneGap),
+		m.outputView(layout.contextWidth, layout.contextHeight),
 	)
 }
 
@@ -198,12 +209,4 @@ func (m Model) detailVisibleLines() int {
 		return 1
 	}
 	return height
-}
-
-func stringsRepeat(s string, count int) string {
-	out := ""
-	for i := 0; i < count; i++ {
-		out += s
-	}
-	return out
 }

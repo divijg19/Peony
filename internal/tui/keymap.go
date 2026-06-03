@@ -60,6 +60,14 @@ var helpKeyHints = []keyHint{
 	{Key: "q", Label: "close"},
 }
 
+var outputKeyHints = []keyHint{
+	{Key: "j/k", Label: "scroll"},
+	{Key: "pgup/pgdn", Label: "page"},
+	{Key: "home/end", Label: "edge"},
+	{Key: "ctrl+o", Label: "close"},
+	{Key: "esc", Label: "close"},
+}
+
 func keyHelpLines(mode Mode) []string {
 	return []string{
 		activeLabelStyle.Render("Bloom keys"),
@@ -69,6 +77,7 @@ func keyHelpLines(mode Mode) []string {
 		"enter or Tab focuses detail",
 		"h/l switches Ready, Resting, and All",
 		"Ctrl+D and Ctrl+U scroll detail when detail is focused",
+		"Ctrl+O opens command/search output when output exists",
 		"",
 		labelStyle.Render("Work"),
 		"a capture a thought",

@@ -269,7 +269,7 @@ It is especially suited for:
 
 ## Project Status
 
-`Peony` is **pre-WebUI, CLI and TUI complete**.
+`Peony` is **CLI and TUI complete, and WebUI is yet to be worked upon**.
 The focus is on:
 
 * core lifecycle correctness
@@ -289,9 +289,10 @@ Feature creep is intentionally resisted.
 * [x] v0.5 - CLI polish, user feedback iteration
 * [x] v0.6 - TUI frontend initialization
 * [x] v0.7 - TUI Polish, CI and Docs
-* [ ] v0.8 - Read-only WebUI frontend (Eden integration)
-* [ ] v0.9 - Overall polish, interactivity and user feedback iteration
-* [ ] v1.0+ - Optional Semantic AI integration (non-prescriptive, reflective only)
+* [x] v0.8 - TUI Finalization and Completion
+* [ ] v0.9 - Read-only WebUI frontend (Eden integration)
+* [ ] v1.0 - Overall polish, interactivity and user feedback iteration
+* [ ] Beyond - Eden, Dashboard, Semantic AI integration, Heuristics & Fuzzing
 
 AI integration, if ever added, will be:
 

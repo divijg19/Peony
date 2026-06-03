@@ -31,7 +31,28 @@ const (
 	FocusQueue PaneFocus = iota
 	FocusDetail
 	FocusPrompt
+	FocusOutput
 )
+
+type OutputKind string
+
+const (
+	OutputCommand OutputKind = "command"
+	OutputSearch  OutputKind = "search"
+	OutputHelp    OutputKind = "help"
+	OutputStatus  OutputKind = "status"
+	OutputWarning OutputKind = "warning"
+	OutputError   OutputKind = "error"
+)
+
+type CommandResult struct {
+	Title        string
+	Lines        []string
+	Kind         OutputKind
+	Source       string
+	ScrollOffset int
+	Open         bool
+}
 
 type FilterKind int
 
@@ -110,7 +131,7 @@ type Model struct {
 	filterIndex      int
 	query            string
 	status           string
-	commandOutput    []string
+	output           CommandResult
 	pendingReleaseID int64
 
 	selected     int
@@ -126,6 +147,11 @@ type Model struct {
 	tendID      int64
 	search      textinput.Model
 	command     textinput.Model
+
+	searchHistory       []string
+	searchHistoryIndex  int
+	commandHistory      []string
+	commandHistoryIndex int
 }
 
 // Init implements tea.Model.
@@ -166,12 +192,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.focus == FocusOutput {
+		return m.updateOutputFocus(msg)
+	}
 	switch msg.String() {
 	case "q", "ctrl+c":
 		return m, tea.Quit
 	case "esc":
-		m.focus = FocusQueue
-		m.status = ""
+		if m.output.Open {
+			m.closeOutput()
+			m.status = "Output closed."
+		} else {
+			m.focus = FocusQueue
+			m.status = ""
+		}
 	case "?":
 		m.mode = ModeHelp
 		m.status = ""
@@ -204,6 +238,8 @@ func (m Model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		} else {
 			m.moveSelection(-5)
 		}
+	case "ctrl+o":
+		m.openOutputFocus()
 	case "right", "l":
 		m.applyFilterIndex((m.filter.index() + 1) % len(filterKinds))
 	case "left", "h":
@@ -226,12 +262,14 @@ func (m Model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.focus = FocusPrompt
 		m.search.SetValue(m.query)
 		m.search.Focus()
+		m.searchHistoryIndex = len(m.searchHistory)
 		m.status = ""
 	case ":":
 		m.mode = ModeCommand
 		m.focus = FocusPrompt
 		m.command.SetValue("")
 		m.command.Focus()
+		m.commandHistoryIndex = len(m.commandHistory)
 		m.status = ""
 	case "f":
 		m.mode = ModeFilter
@@ -293,20 +331,30 @@ func (m Model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "enter":
 		m.query = strings.TrimSpace(m.search.Value())
+		m.pushSearchHistory(m.query)
 		m.mode = ModeBrowse
 		m.focus = FocusQueue
 		m.search.Blur()
 		m.reloadPreserving(0)
 		if m.query == "" {
 			m.status = "Search cleared."
+			m.clearOutput()
 		} else if len(m.snapshot.Thoughts) == 0 {
 			m.status = "No matching thought found. Nothing is wrong."
+			m.setOutput("Search", []string{fmt.Sprintf("No matches for %q.", m.query), "Archived thoughts stay hidden from Bloom search unless you ask for them through view archived."}, OutputSearch, "search", true)
 		} else {
 			m.status = "Search applied."
+			m.setOutput("Search", []string{fmt.Sprintf("%d result(s) for %q.", len(m.snapshot.Thoughts), m.query)}, OutputSearch, "search", false)
 		}
 		return m, nil
 	case "ctrl+u":
 		m.search.SetValue("")
+	case "up":
+		m.recallSearchHistory(-1)
+		return m, nil
+	case "down":
+		m.recallSearchHistory(1)
+		return m, nil
 	}
 
 	var cmd tea.Cmd
@@ -330,16 +378,52 @@ func (m Model) updateCommand(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.focus = FocusQueue
 			m.status = "Command is empty."
 		} else {
+			m.pushCommandHistory(value)
 			m.runCommand(value)
 		}
 		return m, nil
 	case "ctrl+u":
 		m.command.SetValue("")
+	case "up":
+		m.recallCommandHistory(-1)
+		return m, nil
+	case "down":
+		m.recallCommandHistory(1)
+		return m, nil
 	}
 
 	var cmd tea.Cmd
 	m.command, cmd = m.command.Update(msg)
 	return m, cmd
+}
+
+func (m Model) updateOutputFocus(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "ctrl+o":
+		m.closeOutput()
+		m.status = "Output closed."
+	case "tab":
+		if m.hasSelection() {
+			m.focus = FocusDetail
+		} else {
+			m.focus = FocusQueue
+		}
+	case "q", "ctrl+c":
+		return m, tea.Quit
+	case "up", "k":
+		m.scrollOutput(-1)
+	case "down", "j":
+		m.scrollOutput(1)
+	case "ctrl+u", "pgup":
+		m.scrollOutput(-6)
+	case "ctrl+d", "pgdown":
+		m.scrollOutput(6)
+	case "home":
+		m.output.ScrollOffset = 0
+	case "end":
+		m.output.ScrollOffset = m.maxOutputOffset()
+	}
+	return m, nil
 }
 
 func (m Model) updateFilter(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -621,6 +705,139 @@ func (m *Model) scrollDetail(delta int) {
 	if m.detailOffset > maxOffset {
 		m.detailOffset = maxOffset
 	}
+}
+
+func (m *Model) scrollOutput(delta int) {
+	m.output.ScrollOffset += delta
+	if m.output.ScrollOffset < 0 {
+		m.output.ScrollOffset = 0
+	}
+	if maxOffset := m.maxOutputOffset(); m.output.ScrollOffset > maxOffset {
+		m.output.ScrollOffset = maxOffset
+	}
+}
+
+func (m Model) maxOutputOffset() int {
+	layout := m.layout()
+	width := layout.contextWidth
+	height := layout.contextHeight
+	if width == 0 {
+		width = layout.detailWidth
+		height = layout.detailHeight
+	}
+	if layout.kind == layoutCompact {
+		width = layout.bodyWidth
+		height = layout.bodyHeight
+	}
+	innerWidth := maxInt(12, width-outputStyle.GetHorizontalFrameSize())
+	innerHeight := maxInt(3, height-outputStyle.GetVerticalFrameSize())
+	lines := m.outputViewLines(innerWidth)
+	maxOffset := len(lines) - innerHeight
+	if maxOffset < 0 {
+		return 0
+	}
+	return maxOffset
+}
+
+func (m *Model) setOutput(title string, lines []string, kind OutputKind, source string, open bool) {
+	m.output = CommandResult{
+		Title:  strings.TrimSpace(title),
+		Lines:  compactOutputLines(lines),
+		Kind:   kind,
+		Source: strings.TrimSpace(source),
+		Open:   open,
+	}
+}
+
+func (m *Model) clearOutput() {
+	m.output = CommandResult{}
+	if m.focus == FocusOutput {
+		m.focus = FocusQueue
+	}
+}
+
+func (m *Model) closeOutput() {
+	m.output.Open = false
+	m.output.ScrollOffset = 0
+	if m.focus == FocusOutput {
+		m.focus = FocusQueue
+	}
+}
+
+func (m *Model) openOutputFocus() {
+	if !m.hasOutput() {
+		m.status = "No output to open."
+		return
+	}
+	layout := m.layout()
+	if !m.outputNeedsPanel(layout.contentWidth, layout.promptHeight) {
+		m.status = "Output fits in the prompt."
+		return
+	}
+	m.output.Open = true
+	m.focus = FocusOutput
+	m.status = "Output focused."
+}
+
+func (m Model) hasOutput() bool {
+	return len(m.output.Lines) > 0 || strings.TrimSpace(m.output.Title) != ""
+}
+
+func compactOutputLines(lines []string) []string {
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		out = append(out, strings.TrimRight(line, " \t"))
+	}
+	return out
+}
+
+func (m *Model) pushSearchHistory(value string) {
+	m.searchHistory = pushHistory(m.searchHistory, value)
+	m.searchHistoryIndex = len(m.searchHistory)
+}
+
+func (m *Model) pushCommandHistory(value string) {
+	m.commandHistory = pushHistory(m.commandHistory, value)
+	m.commandHistoryIndex = len(m.commandHistory)
+}
+
+func pushHistory(history []string, value string) []string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return history
+	}
+	if len(history) > 0 && history[len(history)-1] == value {
+		return history
+	}
+	history = append(history, value)
+	if len(history) > 50 {
+		return history[len(history)-50:]
+	}
+	return history
+}
+
+func (m *Model) recallSearchHistory(delta int) {
+	if len(m.searchHistory) == 0 {
+		return
+	}
+	m.searchHistoryIndex = clampInt(m.searchHistoryIndex+delta, 0, len(m.searchHistory))
+	if m.searchHistoryIndex == len(m.searchHistory) {
+		m.search.SetValue("")
+		return
+	}
+	m.search.SetValue(m.searchHistory[m.searchHistoryIndex])
+}
+
+func (m *Model) recallCommandHistory(delta int) {
+	if len(m.commandHistory) == 0 {
+		return
+	}
+	m.commandHistoryIndex = clampInt(m.commandHistoryIndex+delta, 0, len(m.commandHistory))
+	if m.commandHistoryIndex == len(m.commandHistory) {
+		m.command.SetValue("")
+		return
+	}
+	m.command.SetValue(m.commandHistory[m.commandHistoryIndex])
 }
 
 func (m *Model) toggleFocus() {

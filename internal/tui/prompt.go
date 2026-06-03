@@ -14,6 +14,12 @@ func (m Model) promptBarView(layout frameLayout) string {
 
 func (m Model) footerView(layout frameLayout) string {
 	_, hints := m.promptContent(layout.contentWidth)
+	if m.focus == FocusOutput {
+		hints = outputKeyHints
+	} else if m.hasOutput() && m.mode == ModeBrowse {
+		hints = append([]keyHint{}, hints...)
+		hints = append(hints, keyHint{Key: "ctrl+o", Label: "output"})
+	}
 	keys := m.keyLegend(hints, layout.contentWidth-footerStyle.GetHorizontalFrameSize())
 	return renderRailRow(footerStyle, layout.contentWidth, keys)
 }
@@ -40,11 +46,16 @@ func (m Model) promptContent(width int) (string, []keyHint) {
 }
 
 func (m Model) idlePrompt(width int) string {
-	lines := []string{promptLabelStyle.Render("Bloom prompt") + "  " + keyStyle.Render("/") + " " + keyDescStyle.Render("search") + "  " + keyStyle.Render(":") + " " + keyDescStyle.Render("command")}
+	lines := []string{
+		promptLabelStyle.Render("Bloom") + "  " +
+			keyStyle.Render("/") + " " + keyDescStyle.Render("search") + "  " +
+			keyStyle.Render(":") + " " + keyDescStyle.Render("command") + "  " +
+			m.primaryActionChip(),
+	}
 	if status := strings.TrimSpace(m.status); status != "" {
 		lines = append(lines, oneLine(status, maxInt(12, width-4)))
-	} else if len(m.commandOutput) > 0 {
-		lines = append(lines, oneLine(m.commandOutput[0], maxInt(12, width-4)))
+	} else if m.hasOutput() {
+		lines = append(lines, m.outputPreview(width))
 	} else if m.query != "" {
 		lines = append(lines, "Search active: "+oneLine(m.query, maxInt(12, width-17)))
 	} else {
@@ -89,10 +100,10 @@ func (m Model) commandPrompt(width int) string {
 	lines := []string{promptLabelStyle.Render("Command") + "  " + oneLine(value+"_", inputWidth)}
 	if status := strings.TrimSpace(m.status); status != "" {
 		lines = append(lines, oneLine(status, maxInt(12, width-4)))
-	} else if len(m.commandOutput) > 0 {
-		lines = append(lines, oneLine(m.commandOutput[0], maxInt(12, width-4)))
+	} else if m.hasOutput() {
+		lines = append(lines, m.outputPreview(width))
 	} else {
-		lines = append(lines, "A quiet command space is listening.")
+		lines = append(lines, "Try help, view archived, add \"a thought\", tend 1, or release 1.")
 	}
 	lines = append(lines, m.showingLine(width))
 	return strings.Join(lines, "\n")
@@ -128,6 +139,41 @@ func (m Model) tendPrompt() string {
 		return "Add a note if one belongs with this tending."
 	}
 	return "Revise softly, then decide what comes next."
+}
+
+func (m Model) primaryActionChip() string {
+	item, ok := m.selectedItem()
+	if !ok {
+		return keyStyle.Render("a") + " " + keyDescStyle.Render("capture")
+	}
+	if item.Ready {
+		return keyStyle.Render("t") + " " + keyDescStyle.Render("tend")
+	}
+	if item.Thought.CurrentState == "tended" {
+		return keyStyle.Render("r/e") + " " + keyDescStyle.Render("resolve")
+	}
+	return keyStyle.Render("enter") + " " + keyDescStyle.Render("inspect")
+}
+
+func (m Model) outputPreview(width int) string {
+	title := strings.TrimSpace(m.output.Title)
+	if title == "" {
+		title = "Output"
+	}
+	preview := ""
+	for _, line := range m.output.Lines {
+		if strings.TrimSpace(line) != "" {
+			preview = line
+			break
+		}
+	}
+	if preview == "" {
+		preview = title
+	}
+	if m.outputPanelOpen() {
+		return oneLine(title+": "+preview+"  Ctrl+O focuses output.", maxInt(12, width-4))
+	}
+	return oneLine(title+": "+preview, maxInt(12, width-4))
 }
 
 func (m Model) releasePrompt(width int) string {
@@ -171,11 +217,30 @@ func (m Model) plainKeyLegend(hints []keyHint, width int) string {
 }
 
 func (m Model) hasContextOutput(width, promptHeight int) bool {
-	if width < contextOutputWidth {
+	if width < contextOutputWidth || !m.hasOutput() || !m.output.Open {
 		return false
 	}
-	contextWidth := minInt(34, maxInt(28, width*22/100))
-	innerWidth := maxInt(12, contextWidth-outputStyle.GetHorizontalFrameSize())
+	return m.outputNeedsPanel(width, promptHeight)
+}
+
+func (m Model) outputPanelOpen() bool {
+	if !m.hasOutput() || !m.output.Open {
+		return false
+	}
+	layout := m.layout()
+	return m.outputNeedsPanel(layout.contentWidth, layout.promptHeight)
+}
+
+func (m Model) outputNeedsPanel(width, promptHeight int) bool {
+	if !m.hasOutput() {
+		return false
+	}
+	panelWidth := minInt(34, maxInt(28, width*22/100))
+	if width < contextOutputWidth {
+		panelWidth = width
+	}
+	innerWidth := maxInt(12, panelWidth-outputStyle.GetHorizontalFrameSize())
 	promptLines := maxInt(1, promptHeight-promptBarStyle.GetVerticalFrameSize())
-	return len(m.contextOutputLines(innerWidth, promptLines)) > 0
+	lines := m.outputViewLines(innerWidth)
+	return len(lines) > promptLines+1
 }

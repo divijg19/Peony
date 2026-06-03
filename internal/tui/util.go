@@ -137,7 +137,7 @@ func alignRow(width int, left string, right string) string {
 	if gap < 1 {
 		gap = 1
 	}
-	return left + stringsRepeat(" ", gap) + right
+	return left + strings.Repeat(" ", gap) + right
 }
 
 func exactWidth(rendered string, width int) string {
@@ -147,7 +147,7 @@ func exactWidth(rendered string, width int) string {
 	lines := strings.Split(rendered, "\n")
 	for i, line := range lines {
 		if gap := width - lipgloss.Width(line); gap > 0 {
-			lines[i] = line + stringsRepeat(" ", gap)
+			lines[i] = line + strings.Repeat(" ", gap)
 		}
 	}
 	return strings.Join(lines, "\n")

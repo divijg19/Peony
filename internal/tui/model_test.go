@@ -60,6 +60,10 @@ func runCommand(m Model, value string) Model {
 	return press(m, tea.KeyMsg{Type: tea.KeyEnter})
 }
 
+func outputText(m Model) string {
+	return strings.Join(m.output.Lines, "\n")
+}
+
 func assertViewFits(t *testing.T, m Model, width, height int) string {
 	t.Helper()
 	m = sized(m, width, height)
@@ -279,7 +283,7 @@ func TestPromptBarAlwaysPresentAndBounded(t *testing.T) {
 	if got := m.layout().promptHeight; got != 5 {
 		t.Fatalf("browse prompt height = %d, want 5", got)
 	}
-	if !strings.Contains(m.View(), "Bloom prompt") || !strings.Contains(m.View(), "/ search") || !strings.Contains(m.View(), ": command") {
+	if !strings.Contains(m.View(), "Bloom") || !strings.Contains(m.View(), "/ search") || !strings.Contains(m.View(), ": command") {
 		t.Fatalf("browse prompt bar missing launcher text: %q", m.View())
 	}
 
@@ -337,8 +341,8 @@ func TestCommandBarRunsReadableCommands(t *testing.T) {
 		{"tui", "Bloom is already open"},
 	} {
 		m = runCommand(m, tc.command)
-		if !strings.Contains(strings.Join(m.commandOutput, "\n"), tc.want) {
-			t.Fatalf("command %q output = %+v, want %q", tc.command, m.commandOutput, tc.want)
+		if !strings.Contains(outputText(m), tc.want) {
+			t.Fatalf("command %q output = %+v, want %q", tc.command, m.output.Lines, tc.want)
 		}
 	}
 }
@@ -359,6 +363,17 @@ func TestCommandBarRunsMutatingAndTUIScreenCommands(t *testing.T) {
 	}
 	id := m.snapshot.Thoughts[0].Thought.ID
 
+	m = runCommand(m, `add "quoted tender thought"`)
+	foundQuoted := false
+	for _, item := range m.snapshot.Thoughts {
+		if item.Thought.Content == "quoted tender thought" {
+			foundQuoted = true
+		}
+	}
+	if len(m.snapshot.Thoughts) != 2 || !foundQuoted {
+		t.Fatalf("quoted add snapshot = %+v", m.snapshot.Thoughts)
+	}
+
 	m = runCommand(m, fmt.Sprintf("tend %d", id))
 	if m.mode != ModeTend || m.tendID != id {
 		t.Fatalf("tend command mode=%v tendID=%d want mode tend id %d", m.mode, m.tendID, id)
@@ -366,8 +381,8 @@ func TestCommandBarRunsMutatingAndTUIScreenCommands(t *testing.T) {
 	m = press(m, tea.KeyMsg{Type: tea.KeyEsc})
 
 	m = runCommand(m, fmt.Sprintf("evolve %d", id))
-	if !strings.Contains(strings.Join(m.commandOutput, "\n"), fmt.Sprintf("Evolved #%d", id)) {
-		t.Fatalf("evolve output = %+v", m.commandOutput)
+	if !strings.Contains(outputText(m), fmt.Sprintf("Evolved #%d", id)) {
+		t.Fatalf("evolve output = %+v", m.output.Lines)
 	}
 
 	secondID, err := m.service.Capture("release candidate")
@@ -397,17 +412,47 @@ func TestContextOutputOnlyForWideOverflow(t *testing.T) {
 		t.Fatalf("idle context width = %d, want 0", got)
 	}
 
-	m.status = strings.Repeat("long command feedback ", 12)
+	m = runCommand(m, "version")
+	m = sized(m, 140, 36)
+	if got := m.layout().contextWidth; got != 0 {
+		t.Fatalf("short output context width = %d, want 0", got)
+	}
+	m = press(m, tea.KeyMsg{Type: tea.KeyCtrlO})
+	if m.focus == FocusOutput || m.output.Open {
+		t.Fatalf("short output should stay in prompt, focus=%v open=%v", m.focus, m.output.Open)
+	}
+
+	longLines := []string{strings.Repeat("long command feedback ", 12)}
+	for i := 0; i < 24; i++ {
+		longLines = append(longLines, fmt.Sprintf("output line %02d", i))
+	}
+	m.setOutput("Output", longLines, OutputCommand, "test", true)
 	if got := m.layout().contextWidth; got == 0 {
 		t.Fatal("wide overflow should reserve contextual output")
 	}
 	if !strings.Contains(m.View(), "Output") {
 		t.Fatalf("wide overflow view should render contextual output: %q", m.View())
 	}
+	m = press(m, tea.KeyMsg{Type: tea.KeyCtrlO})
+	if m.focus != FocusOutput {
+		t.Fatalf("ctrl+o focus = %v, want output", m.focus)
+	}
+	m = press(m, tea.KeyMsg{Type: tea.KeyDown})
+	if m.output.ScrollOffset == 0 {
+		t.Fatal("output should scroll independently when focused")
+	}
+	m = press(m, tea.KeyMsg{Type: tea.KeyEsc})
+	if m.focus == FocusOutput || m.output.Open {
+		t.Fatalf("esc should close focused output, focus=%v open=%v", m.focus, m.output.Open)
+	}
 
+	m.setOutput("Output", longLines, OutputCommand, "test", true)
 	m = sized(m, 100, 30)
 	if got := m.layout().contextWidth; got != 0 {
 		t.Fatalf("medium overflow context width = %d, want collapsed output", got)
+	}
+	if !strings.Contains(m.View(), "long command feedback") {
+		t.Fatalf("medium overflow should collapse into body output: %q", m.View())
 	}
 }
 
@@ -422,6 +467,42 @@ func TestChromeRowsFillEveryWindowLine(t *testing.T) {
 	for _, size := range []struct{ width, height int }{{120, 32}, {100, 30}, {76, 24}, {140, 36}} {
 		view := assertViewFits(t, m, size.width, size.height)
 		assertEveryLineWidth(t, view, size.width)
+	}
+
+	longLines := []string{strings.Repeat("structured output ", 12)}
+	for i := 0; i < 12; i++ {
+		longLines = append(longLines, fmt.Sprintf("line %02d", i))
+	}
+	m.setOutput("Output", longLines, OutputCommand, "test", true)
+	for _, size := range []struct{ width, height int }{{140, 36}, {100, 30}, {76, 24}} {
+		view := assertViewFits(t, m, size.width, size.height)
+		assertEveryLineWidth(t, view, size.width)
+	}
+}
+
+func TestPromptHistoryRecall(t *testing.T) {
+	withSettleDuration(t, 0)
+	m := newTestModel(t)
+	if _, err := m.service.Capture("alpha"); err != nil {
+		t.Fatalf("capture: %v", err)
+	}
+	m.reloadPreserving(0)
+
+	m = press(m, runeKey('/'))
+	m.search.SetValue("alpha")
+	m = press(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = press(m, runeKey('/'))
+	m = press(m, tea.KeyMsg{Type: tea.KeyUp})
+	if got := m.search.Value(); got != "alpha" {
+		t.Fatalf("search history recall = %q, want alpha", got)
+	}
+	m = press(m, tea.KeyMsg{Type: tea.KeyEsc})
+
+	m = runCommand(m, "version")
+	m = press(m, runeKey(':'))
+	m = press(m, tea.KeyMsg{Type: tea.KeyUp})
+	if got := m.command.Value(); got != "version" {
+		t.Fatalf("command history recall = %q, want version", got)
 	}
 }
 
@@ -453,7 +534,7 @@ func TestQueueAndDetailScrolling(t *testing.T) {
 	}
 }
 
-func TestBottomRailModes(t *testing.T) {
+func TestPromptBarModes(t *testing.T) {
 	withSettleDuration(t, 0)
 	m := newTestModel(t)
 	if _, err := m.service.Capture("alpha"); err != nil {
@@ -480,7 +561,7 @@ func TestBottomRailModes(t *testing.T) {
 	m = press(m, runeKey('/'))
 	search := m.View()
 	if !strings.Contains(search, "Search") || !strings.Contains(search, "enter apply") {
-		t.Fatalf("search rail incomplete: %q", search)
+		t.Fatalf("search prompt incomplete: %q", search)
 	}
 	m = press(m, tea.KeyMsg{Type: tea.KeyEsc})
 
@@ -501,7 +582,7 @@ func TestBottomRailModes(t *testing.T) {
 	m = press(m, runeKey('f'))
 	filter := m.View()
 	if !strings.Contains(filter, "Ready") || !strings.Contains(filter, "Resting") || !strings.Contains(filter, "All") || !strings.Contains(filter, "h/l choose") {
-		t.Fatalf("filter rail incomplete: %q", filter)
+		t.Fatalf("filter prompt incomplete: %q", filter)
 	}
 	if strings.Contains(filter, "Memory") {
 		t.Fatalf("filter view should not expose Memory: %q", filter)
@@ -511,7 +592,7 @@ func TestBottomRailModes(t *testing.T) {
 	m = press(m, runeKey('x'))
 	release := m.View()
 	if !strings.Contains(release, "Release #1 permanently") || !strings.Contains(release, "reindexes local IDs") {
-		t.Fatalf("release rail incomplete: %q", release)
+		t.Fatalf("release prompt incomplete: %q", release)
 	}
 }
 
