@@ -15,6 +15,7 @@ var (
 	promptBarStyle    = lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(lipgloss.Color("180")).Foreground(lipgloss.Color("252")).Padding(0, 1)
 	footerStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("250")).Background(lipgloss.Color("234")).Padding(0, 1)
 	outputStyle       = lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(lipgloss.Color("238")).Padding(0, 1)
+	activeOutputStyle = lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(lipgloss.Color("180")).Padding(0, 1)
 	bodyTextStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
 	labelStyle        = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("187"))
 	promptLabelStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("223"))

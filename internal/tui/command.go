@@ -13,8 +13,34 @@ import (
 
 const peonyVersion = "v0.4"
 
+type commandSpec struct {
+	Name    string
+	Aliases []string
+	Usage   string
+	Help    string
+}
+
+var commandSpecs = []commandSpec{
+	{Name: "help", Aliases: []string{"h"}, Usage: "help [command]", Help: "Show Bloom command help."},
+	{Name: "version", Aliases: []string{"-v"}, Usage: "version", Help: "Show the Peony version."},
+	{Name: "add", Aliases: []string{"a"}, Usage: "add [content]", Help: "Capture a thought, or open capture when content is omitted."},
+	{Name: "view", Aliases: []string{"v"}, Usage: "view [id|state]", Help: "Read visible thoughts, a thought by id, or a state filter."},
+	{Name: "tend", Aliases: []string{"t"}, Usage: "tend [id]", Help: "List ready thoughts or open a thought for tending."},
+	{Name: "release", Aliases: []string{"r"}, Usage: "release <id>", Help: "Ask before permanently releasing a thought."},
+	{Name: "evolve", Aliases: []string{"e"}, Usage: "evolve [id]", Help: "List evolved thoughts or mark one evolved."},
+	{Name: "config", Aliases: []string{"configure", "c"}, Usage: "config [settleDuration <duration>|editor]", Help: "View or update configuration."},
+	{Name: "tui", Usage: "tui", Help: "Report that Bloom is already open."},
+}
+
 func (m *Model) runCommand(line string) {
-	args := strings.Fields(line)
+	args, err := parseCommandLine(line)
+	if err != nil {
+		m.mode = ModeBrowse
+		m.focus = FocusQueue
+		m.status = "Command could not be parsed."
+		m.setOutput("Command error", []string{err.Error()}, OutputError, line, true)
+		return
+	}
 	if len(args) == 0 {
 		m.mode = ModeBrowse
 		m.focus = FocusQueue
@@ -26,15 +52,15 @@ func (m *Model) runCommand(line string) {
 	rest := args[1:]
 	m.mode = ModeBrowse
 	m.focus = FocusQueue
-	m.commandOutput = nil
+	m.clearOutput()
 	m.status = ""
 
-	switch cmd {
+	switch canonicalCommand(cmd) {
 	case "help", "h":
-		m.commandOutput = commandHelp(rest)
+		m.setOutput("Help", commandHelp(rest), OutputHelp, "help", true)
 		m.status = "Help opened."
 	case "version", "-v":
-		m.commandOutput = []string{"Peony " + peonyVersion}
+		m.setOutput("Version", []string{"Peony " + peonyVersion}, OutputCommand, "version", false)
 		m.status = "Version shown."
 	case "add", "a":
 		m.commandAdd(rest)
@@ -49,10 +75,15 @@ func (m *Model) runCommand(line string) {
 	case "config", "configure", "c":
 		m.commandConfig(rest)
 	case "tui":
-		m.commandOutput = []string{"Bloom is already open."}
+		m.setOutput("TUI", []string{"Bloom is already open."}, OutputCommand, "tui", false)
 		m.status = "Already in Bloom."
 	default:
-		m.commandOutput = []string{fmt.Sprintf("Unknown command: %s", cmd), "Try : help"}
+		lines := []string{fmt.Sprintf("Unknown command: %s", cmd)}
+		if suggestion := commandSuggestion(cmd); suggestion != "" {
+			lines = append(lines, "Did you mean: "+suggestion+"?")
+		}
+		lines = append(lines, "Try : help")
+		m.setOutput("Command error", lines, OutputError, line, true)
 		m.status = "Command not recognized."
 	}
 }
@@ -65,18 +96,18 @@ func (m *Model) commandAdd(args []string) {
 		m.addBox.Reset()
 		m.addBox.Focus()
 		m.status = ""
-		m.commandOutput = []string{"Capture opened."}
+		m.setOutput("Capture", []string{"Capture opened."}, OutputCommand, "add", false)
 		return
 	}
 	id, err := m.service.Capture(content)
 	if err != nil {
 		m.status = err.Error()
-		m.commandOutput = []string{err.Error()}
+		m.setOutput("Command error", []string{err.Error()}, OutputError, "add", true)
 		return
 	}
 	m.reloadPreserving(id)
 	m.status = fmt.Sprintf("Saved as #%d.", id)
-	m.commandOutput = []string{fmt.Sprintf("Saved as #%d", id)}
+	m.setOutput("Capture", []string{fmt.Sprintf("Saved as #%d", id)}, OutputCommand, "add", false)
 }
 
 func (m *Model) commandView(args []string) {
@@ -86,12 +117,13 @@ func (m *Model) commandView(args []string) {
 			m.commandError(err)
 			return
 		}
-		m.commandOutput = thoughtTable("Visible thoughts", bloomThoughts(snapshot.Thoughts), 10)
+		lines := thoughtTable("Visible thoughts", bloomThoughts(snapshot.Thoughts), 10)
+		m.setOutput("View", lines, OutputCommand, "view", len(lines) > 3)
 		m.status = "View shown."
 		return
 	}
 	if len(args) != 1 {
-		m.commandOutput = []string{"view: usage: view [id|state]"}
+		m.setOutput("Command error", []string{"view: usage: view [id|state]"}, OutputError, "view", true)
 		m.status = "Command needs one view target."
 		return
 	}
@@ -102,13 +134,14 @@ func (m *Model) commandView(args []string) {
 			m.commandError(err)
 			return
 		}
-		m.commandOutput = thoughtDetail(item)
+		lines := thoughtDetail(item)
+		m.setOutput(fmt.Sprintf("Thought #%d", id), lines, OutputCommand, "view", true)
 		m.status = fmt.Sprintf("Viewing #%d.", id)
 		return
 	}
 	state, ok := parseState(arg)
 	if !ok {
-		m.commandOutput = []string{"view: invalid filter"}
+		m.setOutput("Command error", []string{"view: invalid filter"}, OutputError, "view", true)
 		m.status = "Command filter was not recognized."
 		return
 	}
@@ -117,7 +150,8 @@ func (m *Model) commandView(args []string) {
 		m.commandError(err)
 		return
 	}
-	m.commandOutput = thoughtTable("View "+string(state), gardenThoughts(snapshot.Thoughts), 10)
+	lines := thoughtTable("View "+string(state), gardenThoughts(snapshot.Thoughts), 10)
+	m.setOutput("View "+string(state), lines, OutputCommand, "view "+string(state), len(lines) > 3)
 	m.status = "View shown."
 }
 
@@ -128,18 +162,19 @@ func (m *Model) commandTend(args []string) {
 			m.commandError(err)
 			return
 		}
-		m.commandOutput = thoughtTable("Ready to tend", thoughts, 10)
+		lines := thoughtTable("Ready to tend", thoughts, 10)
+		m.setOutput("Tend", lines, OutputCommand, "tend", len(lines) > 3)
 		m.status = "Tend list shown."
 		return
 	}
 	if len(args) != 1 {
-		m.commandOutput = []string{"tend: usage: tend [id]"}
+		m.setOutput("Command error", []string{"tend: usage: tend [id]"}, OutputError, "tend", true)
 		m.status = "Command needs one thought id."
 		return
 	}
 	id, err := strconv.ParseInt(args[0], 10, 64)
 	if err != nil || id <= 0 {
-		m.commandOutput = []string{"tend: invalid id"}
+		m.setOutput("Command error", []string{"tend: invalid id"}, OutputError, "tend", true)
 		m.status = "Command id was not valid."
 		return
 	}
@@ -148,13 +183,13 @@ func (m *Model) commandTend(args []string) {
 
 func (m *Model) commandRelease(args []string) {
 	if len(args) != 1 {
-		m.commandOutput = []string{"release: usage: release <id>"}
+		m.setOutput("Command error", []string{"release: usage: release <id>"}, OutputError, "release", true)
 		m.status = "Command needs a thought id."
 		return
 	}
 	id, err := strconv.ParseInt(args[0], 10, 64)
 	if err != nil || id <= 0 {
-		m.commandOutput = []string{"release: invalid id"}
+		m.setOutput("Command error", []string{"release: invalid id"}, OutputError, "release", true)
 		m.status = "Command id was not valid."
 		return
 	}
@@ -165,7 +200,7 @@ func (m *Model) commandRelease(args []string) {
 	m.pendingReleaseID = id
 	m.mode = ModeReleaseConfirm
 	m.focus = FocusPrompt
-	m.commandOutput = []string{fmt.Sprintf("Confirm release of #%d.", id)}
+	m.setOutput("Release", []string{fmt.Sprintf("Confirm release of #%d.", id)}, OutputWarning, "release", false)
 	m.status = ""
 }
 
@@ -176,18 +211,19 @@ func (m *Model) commandEvolve(args []string) {
 			m.commandError(err)
 			return
 		}
-		m.commandOutput = thoughtTable("Evolved thoughts", gardenThoughts(snapshot.Thoughts), 10)
+		lines := thoughtTable("Evolved thoughts", gardenThoughts(snapshot.Thoughts), 10)
+		m.setOutput("Evolved", lines, OutputCommand, "evolve", len(lines) > 3)
 		m.status = "Evolved list shown."
 		return
 	}
 	if len(args) != 1 {
-		m.commandOutput = []string{"evolve: usage: evolve [id]"}
+		m.setOutput("Command error", []string{"evolve: usage: evolve [id]"}, OutputError, "evolve", true)
 		m.status = "Command needs one thought id."
 		return
 	}
 	id, err := strconv.ParseInt(args[0], 10, 64)
 	if err != nil || id <= 0 {
-		m.commandOutput = []string{"evolve: invalid id"}
+		m.setOutput("Command error", []string{"evolve: invalid id"}, OutputError, "evolve", true)
 		m.status = "Command id was not valid."
 		return
 	}
@@ -197,7 +233,7 @@ func (m *Model) commandEvolve(args []string) {
 	}
 	m.reloadPreserving(id)
 	m.status = fmt.Sprintf("Evolved #%d.", id)
-	m.commandOutput = []string{fmt.Sprintf("Evolved #%d.", id)}
+	m.setOutput("Evolve", []string{fmt.Sprintf("Evolved #%d.", id)}, OutputCommand, "evolve", false)
 }
 
 func (m *Model) commandConfig(args []string) {
@@ -207,24 +243,25 @@ func (m *Model) commandConfig(args []string) {
 		return
 	}
 	if len(args) == 0 {
-		m.commandOutput = configLines(cfg)
+		lines := configLines(cfg)
+		m.setOutput("Config", lines, OutputCommand, "config", len(lines) > 3)
 		m.status = "Config shown."
 		return
 	}
 	if len(args) >= 1 && (args[0] == "--editor" || args[0] == "editor") {
-		m.commandOutput = []string{"Editor selection is interactive. Use peony config --editor outside Bloom for now."}
+		m.setOutput("Config", []string{"Editor selection is interactive. Use peony config --editor outside Bloom for now."}, OutputWarning, "config editor", true)
 		m.status = "Config editor selection needs the CLI."
 		return
 	}
 	if len(args) >= 1 && (args[0] == "--settleDuration" || args[0] == "settleDuration") {
 		if len(args) < 2 || strings.TrimSpace(args[1]) == "" {
-			m.commandOutput = []string{"config settleDuration: provide a duration, for example 24h"}
+			m.setOutput("Command error", []string{"config settleDuration: provide a duration, for example 24h"}, OutputError, "config", true)
 			m.status = "Config duration missing."
 			return
 		}
 		dur, err := time.ParseDuration(args[1])
 		if err != nil {
-			m.commandOutput = []string{"config: invalid settle duration"}
+			m.setOutput("Command error", []string{"config: invalid settle duration"}, OutputError, "config", true)
 			m.status = "Config duration was invalid."
 			return
 		}
@@ -234,17 +271,18 @@ func (m *Model) commandConfig(args []string) {
 			m.commandError(fmt.Errorf("config: %w", err))
 			return
 		}
-		m.commandOutput = configLines(cfg)
+		lines := configLines(cfg)
+		m.setOutput("Config", lines, OutputCommand, "config", len(lines) > 3)
 		m.status = "Config saved."
 		return
 	}
-	m.commandOutput = []string{fmt.Sprintf("config: unknown argument %s", strings.Join(args, " "))}
+	m.setOutput("Command error", []string{fmt.Sprintf("config: unknown argument %s", strings.Join(args, " "))}, OutputError, "config", true)
 	m.status = "Config command was not recognized."
 }
 
 func (m *Model) commandError(err error) {
 	m.status = err.Error()
-	m.commandOutput = []string{err.Error()}
+	m.setOutput("Command error", []string{err.Error()}, OutputError, "command", true)
 }
 
 func (m *Model) startTendByID(id int64) {
@@ -254,7 +292,7 @@ func (m *Model) startTendByID(id int64) {
 		return
 	}
 	if !item.Ready {
-		m.commandOutput = []string{fmt.Sprintf("#%d is still settling.", id)}
+		m.setOutput("Tend", []string{fmt.Sprintf("#%d is still settling.", id)}, OutputWarning, "tend", true)
 		m.status = "This thought is still settling."
 		return
 	}
@@ -265,43 +303,105 @@ func (m *Model) startTendByID(id int64) {
 	m.tendContent.SetValue(item.Thought.Content)
 	m.tendNote.Reset()
 	m.focusTendInput()
-	m.commandOutput = []string{fmt.Sprintf("Tending #%d.", id)}
+	m.setOutput("Tend", []string{fmt.Sprintf("Tending #%d.", id)}, OutputCommand, "tend", false)
 	m.status = ""
 }
 
 func commandHelp(args []string) []string {
 	if len(args) == 0 {
-		return []string{
-			"Peony commands",
-			"help [command]",
-			"version",
-			"add [content]",
-			"view [id|state]",
-			"tend [id]",
-			"release <id>",
-			"evolve [id]",
-			"config [setting]",
-			"tui",
+		lines := []string{"Peony commands"}
+		for _, spec := range commandSpecs {
+			lines = append(lines, fmt.Sprintf("%-28s %s", spec.Usage, spec.Help))
+		}
+		return lines
+	}
+	name := canonicalCommand(strings.TrimPrefix(args[0], "--"))
+	for _, spec := range commandSpecs {
+		if spec.Name == name {
+			return []string{
+				"peony " + spec.Name,
+				spec.Help,
+				"Usage: " + spec.Usage,
+			}
 		}
 	}
-	switch strings.TrimPrefix(args[0], "--") {
-	case "add":
-		return []string{"peony add", "Capture a thought.", "Usage: add [content]"}
-	case "view":
-		return []string{"peony view", "Read visible thoughts, a thought by id, or a state filter.", "Usage: view [id|captured|resting|tended|evolved|released|archived]"}
-	case "tend":
-		return []string{"peony tend", "List ready thoughts or open a thought for tending.", "Usage: tend [id]"}
-	case "release":
-		return []string{"peony release", "Ask before permanently releasing a thought.", "Usage: release <id>"}
-	case "evolve":
-		return []string{"peony evolve", "List evolved thoughts or mark one evolved.", "Usage: evolve [id]"}
-	case "config":
-		return []string{"peony config", "View or update configuration.", "Usage: config [settleDuration <duration>|editor]"}
-	case "tui":
-		return []string{"peony tui", "Bloom is already open."}
-	default:
-		return []string{fmt.Sprintf("No help available for: %s", args[0])}
+	return []string{fmt.Sprintf("No help available for: %s", args[0])}
+}
+
+func canonicalCommand(value string) string {
+	for _, spec := range commandSpecs {
+		if value == spec.Name {
+			return spec.Name
+		}
+		for _, alias := range spec.Aliases {
+			if value == alias {
+				return spec.Name
+			}
+		}
 	}
+	return value
+}
+
+func commandSuggestion(value string) string {
+	for _, spec := range commandSpecs {
+		if strings.HasPrefix(spec.Name, value) || strings.HasPrefix(value, spec.Name) {
+			return spec.Name
+		}
+		for _, alias := range spec.Aliases {
+			if strings.HasPrefix(alias, value) || strings.HasPrefix(value, alias) {
+				return spec.Name
+			}
+		}
+	}
+	return ""
+}
+
+func parseCommandLine(line string) ([]string, error) {
+	args := []string{}
+	var current strings.Builder
+	var quote rune
+	escaped := false
+	for _, r := range strings.TrimSpace(line) {
+		if escaped {
+			current.WriteRune(r)
+			escaped = false
+			continue
+		}
+		if r == '\\' {
+			escaped = true
+			continue
+		}
+		if quote != 0 {
+			if r == quote {
+				quote = 0
+			} else {
+				current.WriteRune(r)
+			}
+			continue
+		}
+		if r == '"' || r == '\'' {
+			quote = r
+			continue
+		}
+		if r == ' ' || r == '\t' || r == '\n' || r == '\r' {
+			if current.Len() > 0 {
+				args = append(args, current.String())
+				current.Reset()
+			}
+			continue
+		}
+		current.WriteRune(r)
+	}
+	if escaped {
+		current.WriteRune('\\')
+	}
+	if quote != 0 {
+		return nil, fmt.Errorf("unterminated quote in command")
+	}
+	if current.Len() > 0 {
+		args = append(args, current.String())
+	}
+	return args, nil
 }
 
 func parseState(value string) (core.State, bool) {

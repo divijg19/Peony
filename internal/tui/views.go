@@ -25,6 +25,8 @@ func (m Model) showingLine(width int) string {
 		focus = "detail"
 	} else if m.focus == FocusPrompt {
 		focus = "prompt"
+	} else if m.focus == FocusOutput {
+		focus = "output"
 	}
 	parts := []string{fmt.Sprintf("Showing %s", m.filter.label()), fmt.Sprintf("%s focus", focus)}
 	if item, ok := m.selectedItem(); ok {
@@ -194,55 +196,45 @@ func (m Model) helpView(layout frameLayout) string {
 	return renderBox(sheetStyle, layout.bodyWidth, layout.bodyHeight, strings.Join(fitLines(lines, maxInt(3, layout.bodyHeight-sheetStyle.GetVerticalFrameSize())), "\n"))
 }
 
-func (m Model) contextOutputView(width, height, promptHeight int) string {
+func (m Model) outputView(width, height int) string {
 	innerWidth := maxInt(12, width-outputStyle.GetHorizontalFrameSize())
 	innerHeight := maxInt(3, height-outputStyle.GetVerticalFrameSize())
-	promptLines := maxInt(1, promptHeight-promptBarStyle.GetVerticalFrameSize())
-	lines := []string{activeLabelStyle.Render("Output")}
-	lines = append(lines, m.contextOutputLines(innerWidth, promptLines)...)
-	return exactWidth(renderBox(outputStyle, width, height, strings.Join(fitLines(lines, innerHeight), "\n")), width)
+	lines := m.outputViewLines(innerWidth)
+	offset := clampInt(m.output.ScrollOffset, 0, maxInt(0, len(lines)-innerHeight))
+	visible := fitLines(lines[offset:], innerHeight)
+	if offset > 0 && len(visible) > 0 {
+		visible[0] = subtleStyle.Render(fmt.Sprintf("%d above", offset))
+	}
+	if offset+innerHeight < len(lines) && len(visible) > 0 {
+		visible[len(visible)-1] = subtleStyle.Render(fmt.Sprintf("%d more", len(lines)-offset-innerHeight))
+	}
+	style := outputStyle
+	if m.focus == FocusOutput {
+		style = activeOutputStyle
+	}
+	return exactWidth(renderBox(style, width, height, strings.Join(widthLines(visible, innerWidth), "\n")), width)
 }
 
-func (m Model) contextOutputLines(width, promptLines int) []string {
-	lines := []string{}
-	if query := strings.TrimSpace(m.query); query != "" {
-		wrapped := wrapText(query, width, subtleStyle)
-		if len(wrapped) > promptLines {
-			lines = append(lines, labelStyle.Render("Search"))
-			lines = append(lines, wrapped...)
-		}
+func (m Model) outputViewLines(width int) []string {
+	title := strings.TrimSpace(m.output.Title)
+	if title == "" {
+		title = "Output"
 	}
-	if status := strings.TrimSpace(m.status); status != "" {
-		wrapped := wrapText(status, width, subtleStyle)
-		if len(wrapped) > promptLines {
-			if len(lines) > 0 {
-				lines = append(lines, "")
-			}
-			lines = append(lines, labelStyle.Render("Status"))
-			lines = append(lines, wrapped...)
-		}
+	lines := []string{activeLabelStyle.Render(title)}
+	if m.output.Source != "" {
+		lines = append(lines, subtleStyle.Render(m.output.Source))
 	}
-	if len(m.commandOutput) > 0 {
-		wrapped := wrapText(strings.Join(m.commandOutput, "\n"), width, subtleStyle)
-		if len(wrapped) > promptLines {
-			if len(lines) > 0 {
-				lines = append(lines, "")
-			}
-			lines = append(lines, labelStyle.Render("Command output"))
-			lines = append(lines, wrapped...)
-		}
+	if len(m.output.Lines) == 0 {
+		lines = append(lines, "", subtleStyle.Render("No output is open."))
+		return lines
 	}
-	if m.mode == ModeCommand {
-		if value := strings.TrimSpace(m.command.Value()); value != "" {
-			wrapped := wrapText(value, width, subtleStyle)
-			if len(wrapped) > promptLines {
-				if len(lines) > 0 {
-					lines = append(lines, "")
-				}
-				lines = append(lines, labelStyle.Render("Command"))
-				lines = append(lines, wrapped...)
-			}
+	lines = append(lines, "")
+	for _, line := range m.output.Lines {
+		if strings.TrimSpace(line) == "" {
+			lines = append(lines, "")
+			continue
 		}
+		lines = append(lines, wrapText(line, width, subtleStyle)...)
 	}
 	return lines
 }
