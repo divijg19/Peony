@@ -34,8 +34,8 @@ func TestReleaseWorkflowBuildsSinglePeonyBinaryAssets(t *testing.T) {
 		"release:",
 		"strategy:",
 		"matrix:",
-		"actions/upload-artifact@v4",
-		"actions/download-artifact@v4",
+		"actions/upload-artifact@v6",
+		"actions/download-artifact@v7",
 		"peony_${RELEASE_TAG}_${GOOS}_${GOARCH}",
 		"go vet ./...",
 		"go test ./...",
@@ -75,8 +75,8 @@ func TestCIWorkflowChecksFormattingTestsVetAndBuild(t *testing.T) {
 	}
 	source := string(data)
 	for _, want := range []string{
-		"actions/checkout@v6",
-		"actions/setup-go@v6",
+		"actions/checkout@v7",
+		"actions/setup-go@v7",
 		"gofmt -l .",
 		"go vet ./...",
 		"go test ./...",
