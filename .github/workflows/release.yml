@@ -38,16 +38,16 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Checkout release ref
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
           fetch-depth: 0
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
-          go-version-file: go.mod
-          cache-dependency-path: go.sum
+          go-version: "1.26.x"
+          cache: true
 
       - name: Validate tag
         run: |
@@ -93,16 +93,16 @@ jobs:
             goarch: arm64
     steps:
       - name: Checkout release ref
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
           fetch-depth: 0
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
-          go-version-file: go.mod
-          cache-dependency-path: go.sum
+          go-version: "1.26.x"
+          cache: true
 
       - name: Build archive
         env:
@@ -144,7 +144,7 @@ jobs:
           tar -tzf "dist/${asset}.tar.gz" | sort | diff -u <(printf 'README.txt\npeony\n') -
 
       - name: Upload packaged archive
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: peony-${{ matrix.goos }}-${{ matrix.goarch }}
           path: dist/peony_*.tar.gz
@@ -158,7 +158,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Download packaged archives
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           path: dist
 
